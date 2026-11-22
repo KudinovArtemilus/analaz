@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KudinovArtemilus/press-go/internal/archive"
 	"github.com/KudinovArtemilus/press-go/internal/batch"
 	"github.com/KudinovArtemilus/press-go/internal/extract"
 	"github.com/KudinovArtemilus/press-go/internal/features"
@@ -83,7 +84,9 @@ type featOpStatus struct {
 	Young   int
 	Damaged int
 	Redone  int    // пересчитано по новой версии признаков
-	Stale   int    // ещё ждут пересчёта (среди файлов, что есть в папках)
+	Stale   int    // ещё ждут пересчёта (файл есть в папках или в архиве)
+	Archive int    // из них — из архива: в папках файла уже нет
+	Lost    int    // старой версии, а файла нет ни в папках, ни в архиве — так и останутся
 	Merged  int    // перенесено строк из другой таблицы (features_quick…)
 	From    string // откуда перенесены
 	Errors  []string
@@ -241,6 +244,9 @@ func (fr *featRunner) logOp(r featOpStatus) {
 	if r.Redone > 0 {
 		msg += fmt.Sprintf(", пересчитано по новой версии %d (ждут ещё %d)", r.Redone, r.Stale)
 	}
+	if r.Lost > 0 {
+		msg += fmt.Sprintf(", старой версии без файла (ни в буфере, ни в архиве) %d", r.Lost)
+	}
 	if r.Damaged > 0 {
 		msg += fmt.Sprintf(" (повреждённых %d)", r.Damaged)
 	}
@@ -303,9 +309,12 @@ func (fr *featRunner) plan(name, op string, version int, dir string, roots []str
 	st.Rows = len(d.files)
 
 	now := fr.now()
+	arcs := &archLookup{s: fr.s, by: map[string]*archive.Archive{}}
 	opt := extract.Options{
 		Roots: roots, Filter: batch.Filter{Op: op}, Jobs: featJobs, Loc: loc, FreshFirst: true, MinAge: featMinAge,
-		Stale: d.stale,
+		Stale:       d.stale,
+		InArchive:   func(file string) bool { _, _, ok := arcs.find(file); return ok },
+		ReadArchive: arcs.read,
 		Skip: func(p string) bool {
 			fr.mu.Lock()
 			defer fr.mu.Unlock()
@@ -318,7 +327,7 @@ func (fr *featRunner) plan(name, op string, version int, dir string, roots []str
 		st.Err = fmt.Sprintf("папка с .shp недоступна: %v", err)
 		return nil
 	}
-	st.Todo, st.Young, st.Stale = ps.Todo, ps.Young, ps.Stale
+	st.Todo, st.Young, st.Stale, st.Archive, st.Lost = ps.Todo, ps.Young, ps.Stale, ps.Archive, ps.Lost
 	if len(todo) == 0 && st.Merged == 0 {
 		return nil
 	}
@@ -381,6 +390,42 @@ func (fr *featRunner) apply(j *featJob, files []string, phase string) {
 	}
 	fr.remember(j.op, doneOf(j.table, modTime(j.target), j.version))
 	j.table = nil // следующую фазу — с диска: все таблицы сразу в памяти не держим
+}
+
+// archLookup — где в архиве цикл из таблицы признаков. Архив профиля открывается один раз
+// на проход: циклов старой версии без файла в буфере бывают тысячи.
+type archLookup struct {
+	s  *Server
+	mu sync.Mutex
+	by map[string]*archive.Archive // id профиля → архив (nil — архива нет)
+}
+
+func (l *archLookup) find(file string) (*archive.Archive, string, bool) {
+	root, rel := l.s.rootOf(file)
+	if rel == "" {
+		return nil, "", false
+	}
+	l.mu.Lock()
+	a, ok := l.by[root.Profile]
+	if !ok {
+		a = l.s.arch.forProfile(root.Profile)
+		l.by[root.Profile] = a
+	}
+	l.mu.Unlock()
+	ar := archRel(root, rel)
+	if a == nil || !a.Has(ar) {
+		return nil, "", false
+	}
+	return a, ar, true
+}
+
+// read — содержимое цикла из архива (распакованное).
+func (l *archLookup) read(file string) ([]byte, error) {
+	a, ar, ok := l.find(file)
+	if !ok {
+		return nil, errors.New("в архиве нет")
+	}
+	return a.Read(ar)
 }
 
 func (fr *featRunner) remember(op string, d featDone) {

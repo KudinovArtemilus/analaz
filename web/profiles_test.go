@@ -446,6 +446,13 @@ func page(h http.Handler, url string) string {
 	return strings.Join(strings.Fields(b), " ")
 }
 
+// adminPage — страница «Настроек» (открывается только локально), пробелы и переносы схлопнуты:
+// IDE переформатирует шаблоны и разбивает длинные строки.
+func adminPage(h http.Handler) string {
+	b := do(h, "GET", "/admin", nil, true, nil).Body.String()
+	return strings.Join(strings.Fields(b), " ")
+}
+
 // writeKps — синтетический цикл КПС с заданным колесом (DV/DW) и признаками осей.
 func writeKps(t *testing.T, buf string, i int, dv, dw float64) {
 	t.Helper()

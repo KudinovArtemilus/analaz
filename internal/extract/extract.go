@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/KudinovArtemilus/press-go/internal/batch"
@@ -28,6 +30,11 @@ type Result struct {
 	F      features.Features
 	Err    error
 }
+
+// ArchivePrefix — пометка в списке todo: файла в папках уже нет, цикл берётся из архива
+// (archive:<путь из таблицы>). Нужна для пересчёта старой версии признаков после того,
+// как буфер регистратора файл удалил.
+const ArchivePrefix = "archive:"
 
 // Process — признаки одного файла. Паника (выход за границы массива на битом файле)
 // не должна уронить обработку тысяч файлов: ловим её и превращаем в ошибку этого файла.
@@ -48,6 +55,28 @@ func Process(path string, loc *time.Location) (res Result) {
 		res.Err = fmt.Errorf("%s: %w", path, err)
 		return res
 	}
+	return compute(res, f, abs, loc)
+}
+
+// ProcessData — признаки цикла, прочитанного не из папки (из архива): file — путь цикла
+// из таблицы, под ним строка и заменяется.
+func ProcessData(file string, data []byte, loc *time.Location) (res Result) {
+	res.Path = ArchivePrefix + file
+	defer func() {
+		if p := recover(); p != nil {
+			res.Err = fmt.Errorf("%s: паника: %v\n%s", file, p, debug.Stack())
+		}
+	}()
+	f, err := shp.Parse(data)
+	if err != nil {
+		res.Err = fmt.Errorf("%s (из архива): %w", file, err)
+		return res
+	}
+	return compute(res, f, file, loc)
+}
+
+func compute(res Result, f *shp.File, abs string, loc *time.Location) Result {
+	path := res.Path
 	f.Path = abs
 	res.File = abs
 	res.Op = shp.ParseName(abs, loc).Op
@@ -83,6 +112,10 @@ type Options struct {
 	// Stale — циклы (по имени файла, batch.FileName), посчитанные старой версией признаков:
 	// их надо пересчитать, хоть они и в таблице. Идут в историю (после новых); строка заменяется.
 	Stale map[string]bool
+	// InArchive и ReadArchive — архив сохранённых циклов (сервер): цикл старой версии признаков,
+	// которого в папках уже нет, пересчитывается из архива. nil — архива нет.
+	InArchive   func(file string) bool
+	ReadArchive func(file string) ([]byte, error)
 	// Skip — не брать этот файл (сервер не повторяет недавние ошибки каждые 5 минут).
 	Skip func(path string) bool
 	// SaveEvery — сохранять таблицу каждые N добавленных циклов (0 — 500).
@@ -101,6 +134,8 @@ type Stats struct {
 	Todo    int      // ещё не посчитано (до Limit)
 	Fresh   int      // из них новых (после последнего посчитанного) — в начале списка, если FreshFirst
 	Stale   int      // из них — пересчёт старой версии признаков
+	Archive int      // из них — из архива (в папках файла уже нет)
+	Lost    int      // старой версии, но файла нет ни в папках, ни в архиве: пересчитать нельзя
 	Redone  int      // пересчитано (строка заменена) в этот раз
 	Taken   int      // взято в работу в этот раз
 	Added   int      // добавлено строк
@@ -208,6 +243,33 @@ func Plan(done map[string]bool, opt Options) ([]string, Stats, error) {
 			gaps = append(gaps, p) // пропуски истории и пересчёт старой версии — после новых
 		}
 	}
+	// старая версия, а файла в папках уже нет (буфер удалил) — из архива, если цикл там сохранён
+	if len(opt.Stale) > 0 {
+		inFolders := make(map[string]bool, len(files))
+		for _, p := range files {
+			inFolders[batch.FileName(p)] = true
+		}
+		seen := map[string]bool{}
+		var arch []string
+		for f := range done {
+			n := batch.FileName(f)
+			if !opt.Stale[n] || inFolders[n] || seen[n] {
+				continue
+			}
+			seen[n] = true
+			switch {
+			case opt.Skip != nil && opt.Skip(ArchivePrefix+f):
+			case opt.InArchive != nil && opt.InArchive(f):
+				arch = append(arch, ArchivePrefix+f)
+			default:
+				st.Lost++
+			}
+		}
+		sort.Strings(arch) // порядок прохода не зависит от порядка map
+		st.Stale += len(arch)
+		st.Archive = len(arch)
+		gaps = append(gaps, arch...)
+	}
 	todo := append(fresh, gaps...)
 	st.Todo, st.Fresh = len(todo), len(fresh)
 	if opt.Limit > 0 && len(todo) > opt.Limit {
@@ -235,7 +297,7 @@ func Apply(table *batch.Table, outPath string, todo []string, st Stats, opt Opti
 	for w := 0; w < jobs; w++ {
 		go func() {
 			for p := range paths {
-				results <- Process(p, opt.Loc)
+				results <- processAny(p, opt)
 			}
 		}()
 	}
@@ -286,6 +348,22 @@ func Apply(table *batch.Table, outPath string, todo []string, st Stats, opt Opti
 		}
 	}
 	return st, saveErr
+}
+
+// processAny — файл из папки или (archive:…) цикл из архива.
+func processAny(p string, opt Options) Result {
+	f, ok := strings.CutPrefix(p, ArchivePrefix)
+	if !ok {
+		return Process(p, opt.Loc)
+	}
+	if opt.ReadArchive == nil {
+		return Result{Path: p, Err: fmt.Errorf("%s: архив недоступен", f)}
+	}
+	data, err := opt.ReadArchive(f)
+	if err != nil {
+		return Result{Path: p, Err: fmt.Errorf("%s (из архива): %w", f, err)}
+	}
+	return ProcessData(f, data, opt.Loc)
 }
 
 func logger(opt Options) func(string, ...any) {

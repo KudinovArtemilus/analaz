@@ -22,7 +22,8 @@
     <div class="empty">
       <div class="empty-title">Настройки не подключены</div>
       <div class="muted">Запустите сервер с файлом настроек:
-        <code>server.exe -config C:\press-go\pressgo.json</code><br>Если файла нет, он будет создан.</div>
+        <code>server.exe -config C:\press-go\pressgo.json</code><br>Если файла нет, он будет создан.
+      </div>
     </div>
     {{else}}
     {{with .Error}}<div class="card st-alarm"><b>Не сохранено:</b> {{.}}</div>{{end}}
@@ -143,7 +144,8 @@
         {{featPerPass}} файлов на операцию: сначала новые файлы всех машин, потом пропуски в истории (пока буфер их не
         удалил). Файлы моложе 2 минут ждут следующего прохода — регистратор, возможно, ещё пишет. Строки из таблицы,
         сделанной утилитой extract (features_quick…), переносятся один раз — сама она не меняется. <b>Папки с .shp
-          только читаются.</b></p>
+          только читаются.</b>
+      </p>
       {{with .Feat}}
       <div class="arch-status small">
         {{if .Running}}<div class="note"><b>Идёт проход</b> с {{.Started.Format "15:04:05"}}: {{.Doing}}</div>{{end}}
@@ -156,9 +158,12 @@
         <div><b>{{with .Profile}}{{.}} · {{end}}{{.Op}}:</b> {{.Rows}} циклов в таблице{{if .Added}}, добавлено
           {{.Added}}{{end}}{{if .Redone}}, пересчитано по новой версии признаков {{.Redone}}{{end}}{{if .Damaged}}
           (повреждённых {{.Damaged}}){{end}}{{if .Merged}}, перенесено {{.Merged}} из {{.From}}{{end}}{{if .Todo}},
-          <b>осталось посчитать {{.Todo}}</b>{{if .Stale}} (из них пересчёт по новой версии
-          {{.Stale}}){{end}}{{end}}{{if .Young}}, ждут дозаписи {{.Young}}{{end}}{{if not (or .Added .Redone .Merged
-          .Todo .Err)}} — новых нет{{end}} <span class="muted">· {{.Table}}</span></div>
+          <b>осталось посчитать {{.Todo}}</b>{{if .Stale}} (из них пересчёт по новой версии {{.Stale}}{{if .Archive}},
+          из архива {{.Archive}}{{end}}){{end}}{{end}}{{if .Lost}}, <span class="st-warn">старой версии без файла (ни в
+            буфере, ни в архиве) {{.Lost}} — так и останутся</span>{{end}}{{if .Young}}, ждут дозаписи
+          {{.Young}}{{end}}{{if not (or .Added .Redone .Merged .Todo .Err)}} — новых нет{{end}} <span class="muted">·
+            {{.Table}}</span>
+        </div>
         {{with .Err}}<div class="st-alarm">{{.}}</div>{{end}}
         {{range .Errors}}<div class="st-warn">{{.}}</div>{{end}}
         {{end}}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/KudinovArtemilus/press-go/internal/analyze"
+	"github.com/KudinovArtemilus/press-go/internal/features"
 )
 
 // Страницы анализа (этап 6). Всё считается на сервере и приходит готовым HTML (HTMX);
@@ -173,6 +174,12 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 			data["CommonNorm"] = p.Kind == "kps" && regime == "all" // все колёса вместе — норма общая
 		}
 	}
+	version := features.PressVersion // версия признаков машины: строки старее — посчитаны прежним расчётом
+	if s.cfg != nil {
+		if p := s.cfg.Get().ProfileFor(base); p != nil {
+			version = features.VersionFor(p.Kind)
+		}
+	}
 	if op == "" {
 		s.render(w, "analysis.html", data)
 		return
@@ -316,6 +323,7 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	data["Journal"], data["JournalMore"], data["JournalTail"] = s.journalViews(jr, wallNow())
+	data["OldFeat"], data["FeatVer"] = oldFeatRows(jr, version), version // по всей операции, как и журнал
 	s.render(w, "analysis.html", data)
 }
 
@@ -687,4 +695,24 @@ func (s *Server) analysisHealthCell(w http.ResponseWriter, r *http.Request) {
 		lay = "02.01.2006 15:00"
 	}
 	s.render(w, "analysis_cell.html", map[string]any{"Op": op, "Sub": sub, "When": res.Bins.Starts[b].Format(lay), "Rows": rows})
+}
+
+// oldFeatRows — сколько циклов посчитано прежней версией признаков (колонка feat_ver меньше
+// текущей; нет колонки — версия 0). Сервер пересчитывает их, пока файл есть в буфере или в архиве;
+// остальные так и остаются — анализ должен об этом сказать, а не молчать.
+func oldFeatRows(res *analyze.Result, version int) int {
+	if version == 0 || res.All == nil {
+		return 0
+	}
+	v := res.All.Col("feat_ver")
+	if v == nil {
+		return res.All.Len()
+	}
+	n := 0
+	for _, x := range v {
+		if !(x >= float64(version)) { // NaN — версия 0
+			n++
+		}
+	}
+	return n
 }

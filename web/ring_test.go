@@ -90,7 +90,7 @@ func TestRingProfile(t *testing.T) {
 		t.Errorf("в кольце %d файлов — источник менять нельзя", len(es))
 	}
 	// настройки показывают состояние кольца; «Проверить» подсказывает галочку, если она снята
-	if b := do(s.Handler(), "GET", "/admin", nil, true, nil).Body.String(); !strings.Contains(b, "скопировано с запуска 4") {
+	if b := adminPage(s.Handler()); !strings.Contains(b, "скопировано с запуска 4") {
 		t.Error("в настройках нет состояния кольца")
 	}
 }
