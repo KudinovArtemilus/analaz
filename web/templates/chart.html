@@ -1,0 +1,14 @@
+{{/* «Островок» для TypeScript: данные графиков он загрузит сам по data-атрибутам.
+Двойной щелчок по графику — сброс зума; зум и курсор общие для всех каналов. */}}
+{{if or .N .Ov}}
+<div class="charts" data-cycle-chart data-file="{{.Rel}}" data-ch="{{.Ch}}" {{with .Feat}} data-feat="{{.}}"
+    {{end}}{{with .Ov}} data-ov="{{.}}" {{end}}>
+    <div class="muted pad">загрузка графиков…</div>
+</div>
+<div class="muted small hint">выделите участок мышью — приблизить, двойной щелчок — сбросить{{if not .N}}; отметьте
+    каналы слева — они появятся под обзором{{end}}</div>
+{{else}}
+<div class="empty">
+    <div class="muted">Отметьте каналы слева</div>
+</div>
+{{end}}

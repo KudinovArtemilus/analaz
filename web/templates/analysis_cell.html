@@ -1,0 +1,22 @@
+﻿{{/* Клетка карты здоровья: признаки подсистемы за интервал (6.2б). */}}
+<h3>{{.Sub}} · {{.When}}</h3>
+<p class="muted small">Медиана признака за интервал против нормы; сверху — сильнее всего отклонившиеся. Клетка карты —
+  среднее трёх верхних |z|.</p>
+<table class="tbl small">
+  <tr>
+    <th>признак</th>
+    <th>за интервал</th>
+    <th>норма</th>
+    <th>z</th>
+    <th></th>
+  </tr>
+  {{range .Rows}}<tr class="{{zcls .Z 3.0 6.0}}">
+    <td>{{.Name}}</td>
+    <td>{{v .Value}}</td>
+    <td>{{v .Norm}}</td>
+    <td>{{z .Z}}</td>
+    <td><a hx-get="/analysis/chart?op={{$.Op}}&f={{.Feature}}" hx-target="#an-chart" href="#an-chart">график</a></td>
+  </tr>{{else}}<tr>
+    <td colspan="5" class="muted">нет данных</td>
+  </tr>{{end}}
+</table>

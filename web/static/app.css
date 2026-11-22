@@ -1,0 +1,949 @@
+/* Режим «аналитика»: спокойная нейтральная база, цвет — только у линий графиков.
+   Светлая и тёмная тема переключаются по настройке системы. */
+:root {
+    --bg: #f6f6f4;
+    --panel: #ffffff;
+    --text: #1f1f1d;
+    --muted: #6b6a66;
+    --border: #e2e1dc;
+    --hover: #efeeea;
+    --grid: #ecebe6;
+    --accent: #185fa5;
+    --line-1: #185fa5;
+    --line-2: #0f6e56;
+    --line-3: #993c1d;
+    --line-4: #534ab7;
+    --danger: #a32d2d;
+    --warn-bg: #faeeda;
+    --warn: #854f0b;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1b1b1a;
+        --panel: #242423;
+        --text: #e9e8e3;
+        --muted: #9a9993;
+        --border: #353533;
+        --hover: #2d2d2b;
+        --grid: #2f2f2d;
+        --accent: #85b7eb;
+        --line-1: #85b7eb;
+        --line-2: #5dcaa5;
+        --line-3: #f0997b;
+        --line-4: #afa9ec;
+        --danger: #f09595;
+        --warn-bg: #412402;
+        --warn: #fac775;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 system-ui, "Segoe UI", sans-serif;
+}
+
+.muted {
+    color: var(--muted);
+}
+
+.small {
+    font-size: 12px;
+}
+
+.pad {
+    padding: 8px 12px;
+}
+
+.error {
+    color: var(--danger);
+    padding: 12px;
+}
+
+.top {
+    display: flex;
+    gap: 16px;
+    align-items: baseline;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+}
+
+.brand {
+    font-weight: 600;
+    letter-spacing: .02em;
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    height: calc(100vh - 45px);
+}
+
+.side {
+    border-right: 1px solid var(--border);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.search {
+    margin: 10px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
+
+.files {
+    overflow-y: auto;
+}
+
+.file {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    column-gap: 8px;
+    padding: 6px 12px;
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+}
+
+.file:hover {
+    background: var(--hover);
+}
+
+.op {
+    grid-row: span 2;
+    align-self: center;
+    font-size: 11px;
+    text-align: center;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 0;
+    color: var(--muted);
+}
+
+.fname {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ftime {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.main {
+    overflow-y: auto;
+    padding: 16px 20px;
+}
+
+.empty {
+    display: grid;
+    place-items: center;
+    gap: 6px;
+    min-height: 40vh;
+    text-align: center;
+}
+
+.empty-title {
+    font-size: 16px;
+}
+
+.cycle-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    margin-bottom: 14px;
+}
+
+.cycle-title {
+    font-size: 18px;
+    font-weight: 500;
+}
+
+.stats {
+    display: flex;
+    gap: 20px;
+}
+
+.stat {
+    display: grid;
+    font-size: 12px;
+}
+
+.stat b {
+    font-size: 15px;
+    font-weight: 500;
+}
+
+.cycle-body {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.channels-wrap {
+    display: grid;
+    gap: 6px;
+}
+
+.toggle {
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.channels-wrap:has(.hide-const:checked) .ch.sig-const {
+    display: none;
+}
+
+.channels {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px 0;
+    max-height: calc(100vh - 170px);
+    overflow-y: auto;
+    font-size: 12px;
+}
+
+.channels summary {
+    padding: 4px 12px;
+    cursor: pointer;
+}
+
+.ch {
+    display: block;
+    padding: 2px 12px 2px 24px;
+    cursor: pointer;
+}
+
+.ch:hover {
+    background: var(--hover);
+}
+
+.chart-area {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 12px;
+    min-height: 200px;
+}
+
+.plot {
+    margin-bottom: 6px;
+}
+
+.hint {
+    margin-top: 4px;
+}
+
+/* uPlot: подгоняем подписи под тему */
+.u-title {
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    text-align: left !important;
+    color: var(--text);
+}
+
+.u-legend {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.u-select {
+    background: rgba(127, 127, 127, .15);
+}
+
+/* состояние сигнала канала */
+.sig-label {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    padding-left: 20px;
+}
+
+.ch.sig-const {
+    color: var(--muted);
+}
+
+.ch.sig-problem {
+    background: var(--warn-bg);
+}
+
+.ch.sig-problem .sig-label {
+    color: var(--warn);
+}
+
+.sig-badge {
+    font-size: 11px;
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-radius: 8px;
+    padding: 0 6px;
+}
+
+.sig-summary {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 14px;
+    font-size: 13px;
+}
+
+.sig-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sig-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--warn);
+    flex: none;
+}
+
+.dmg-summary {
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 14px;
+    font-size: 13px;
+}
+
+/* ---------- навигация ---------- */
+.nav,
+.tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.nav a,
+.tabs a {
+    color: var(--muted);
+    text-decoration: none;
+    padding: 2px 10px;
+    border-radius: 6px;
+}
+
+.nav a.on,
+.tabs a.on {
+    color: var(--text);
+    background: var(--hover);
+}
+
+.nav a:hover,
+.tabs a:hover {
+    background: var(--hover);
+}
+
+.tabs {
+    margin-left: auto;
+}
+
+/* ---------- страница «Анализ» (ISA101: цвет только у отклонений) ---------- */
+.page {
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 16px 20px 40px;
+}
+
+.an-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.an-title {
+    font-size: 18px;
+    font-weight: 500;
+}
+
+.an-norm {
+    text-align: right;
+}
+
+.note {
+    background: var(--hover);
+    border-radius: 8px;
+    padding: 6px 12px;
+    margin-bottom: 10px;
+}
+
+.an-counts {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.cnt {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px 14px;
+    display: grid;
+    font-size: 12px;
+    color: var(--muted);
+    min-width: 110px;
+}
+
+.cnt b {
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.an-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 14px;
+    align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .an-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.an-col {
+    display: grid;
+    gap: 12px;
+    align-content: start;
+    min-width: 0;
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+}
+
+.an-col .card {
+    margin-bottom: 0;
+}
+
+.card h3 {
+    margin: 0 0 6px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.card ul {
+    margin: 4px 0 6px 18px;
+    padding: 0;
+}
+
+.card p {
+    margin: 3px 0;
+}
+
+.card summary {
+    cursor: pointer;
+}
+
+.tag {
+    font-size: 11px;
+    border-radius: 6px;
+    padding: 1px 6px;
+    border: 1px solid currentColor;
+}
+
+/* состояния: норма — никак не выделяется */
+.st-alarm {
+    border-left: 4px solid var(--danger);
+}
+
+.st-alarm .tag,
+.cnt.st-alarm b,
+.st-alarm>h3 {
+    color: var(--danger);
+}
+
+.st-warn {
+    border-left: 4px solid var(--warn);
+}
+
+.st-warn .tag,
+.cnt.st-warn b {
+    color: var(--warn);
+}
+
+tr.st-alarm td:first-child,
+tr.st-warn td:first-child {
+    padding-left: 6px;
+}
+
+tr.st-alarm {
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+tr.st-warn {
+    background: var(--warn-bg);
+}
+
+.fc {
+    color: var(--muted);
+    list-style: none;
+    margin-left: -18px;
+}
+
+.feats a,
+.row a {
+    margin-right: 10px;
+}
+
+a[hx-get] {
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: none;
+}
+
+a[hx-get]:hover {
+    text-decoration: underline;
+}
+
+.row {
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.row:last-child {
+    border-bottom: 0;
+}
+
+.ok-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin-top: 6px;
+    color: var(--muted);
+}
+
+.tbl {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.tbl th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding: 3px 6px;
+}
+
+.tbl td {
+    border-bottom: 1px solid var(--border);
+    padding: 3px 6px;
+    vertical-align: top;
+}
+
+.nowrap {
+    white-space: nowrap;
+}
+
+.day {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.day-kpi {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.day-kpi .st-warn {
+    border: 0;
+    color: var(--warn);
+}
+
+.day-unit {
+    padding: 3px 8px;
+}
+
+select {
+    font: inherit;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+}
+
+.an-chart {
+    min-height: 320px;
+}
+
+code {
+    font-size: 12px;
+    background: var(--hover);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+/* ---------- настройки ---------- */
+.form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    align-items: flex-end;
+}
+
+.form label {
+    display: grid;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.form label.wide {
+    flex-basis: 100%;
+}
+
+.form label.inline {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.form input:not([type=checkbox]),
+.form textarea,
+.alias {
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+}
+
+.form textarea {
+    width: 100%;
+    font-family: ui-monospace, Consolas, monospace;
+}
+
+.alias {
+    width: 100%;
+}
+
+.actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-basis: 100%;
+}
+
+button {
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+}
+
+button[type=submit] {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+button:hover {
+    background: var(--hover);
+}
+
+.check {
+    padding: 4px 8px;
+    margin-top: 4px;
+}
+
+.orig {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    padding-left: 20px;
+}
+
+.card h3.sub {
+    margin-top: 12px;
+}
+
+.search {
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    width: 100%;
+    max-width: 360px;
+    margin: 4px 0 8px;
+}
+
+/* ---------- карта здоровья (6.2б) ---------- */
+.health {
+    display: grid;
+    gap: 6px;
+}
+
+.health>div {
+    width: 100%;
+}
+
+#hm-cell:not(:empty) {
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+}
+
+/* Отметки «где в цикле отклонение» над графиками цикла (ссылка со страницы «Анализ») */
+.mark-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 0 8px;
+}
+
+.mark-list button {
+    all: unset;
+    cursor: pointer;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.mark-list button:hover {
+    background: var(--hover);
+}
+
+.mark-n {
+    display: inline-block;
+    min-width: 18px;
+    height: 18px;
+    margin-right: 6px;
+    border-radius: 9px;
+    background: var(--danger);
+    color: #fff;
+    font: bold 11px/18px system-ui, sans-serif;
+    text-align: center;
+}
+
+/* Дискретные сигналы полосами под графиками цикла */
+.dig {
+    margin-top: 10px;
+}
+
+.dig>summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.dig-now {
+    min-height: 2.6em;
+    padding: 2px 0 4px;
+}
+
+/* Обзор цикла: позиция, усилие, давление, перекос — всегда сверху */
+.ov {
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.ov>summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+/* Однотипные узлы (6.2в) */
+.grp-select {
+    font: inherit;
+    padding: 4px 6px;
+    margin: 4px 0;
+    max-width: 100%;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.grp-chart {
+    height: 380px;
+}
+
+/* Было / стало и связи (6.2г) */
+.cmp-sec {
+    margin-top: 14px;
+}
+
+.cmp-sec h4 {
+    margin: 0 0 2px;
+    font-size: 14px;
+}
+
+.cmp-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 18px;
+}
+
+.cmp-grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+
+    .cmp-grid,
+    .cmp-grid-2 {
+        grid-template-columns: 1fr;
+    }
+}
+
+.cmp-cell {
+    min-width: 0;
+}
+
+.cmp-title {
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 4px 0 2px;
+}
+
+.cmp-name {
+    font-weight: 600;
+}
+
+/* Сутки по часам (6.2з) */
+.day-hourly {
+    margin-top: 8px;
+}
+
+.day-hourly>summary {
+    cursor: pointer;
+    margin-bottom: 4px;
+}
+
+.hr-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 6px 14px;
+}
+
+.hr-cell {
+    min-width: 0;
+}
+
+.hr-title {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.hr-chart {
+    height: 150px;
+}
+
+/* Новые правила: узлы и смены */
+.rules {
+    margin: 4px 0 8px;
+    padding-left: 18px;
+}
+
+.rules li {
+    margin: 3px 0;
+}
+
+h4.sub {
+    margin: 10px 0 2px;
+    font-size: 13px;
+}
+
+/* И3: паспорт заготовки */
+.piece-search {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    align-items: center;
+    margin: 4px 0 12px;
+}
+
+.piece-search input {
+    font: inherit;
+    width: 9em;
+    padding: 3px 6px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.piece-search button {
+    font: inherit;
+    padding: 3px 12px;
+}
+
+.piece-h {
+    font-size: 18px;
+    margin: 6px 0 10px;
+}
+
+.piece-ops {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 12px;
+}
+
+.piece-cycle+.piece-cycle {
+    border-top: 1px solid var(--border);
+    margin-top: 10px;
+    padding-top: 10px;
+}
+
+.piece-verdict {
+    margin: 4px 0 6px;
+    padding: 3px 6px;
+}
+
+/* Здоровье по плавкам */
+.hz-hint {
+    margin: 6px 0 2px;
+}

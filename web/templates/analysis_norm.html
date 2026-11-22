@@ -1,0 +1,27 @@
+{{/* Профиль нормы — фрагмент для HTMX (6.2а). */}}
+<h3>Профиль нормы <span class="muted small">{{.From}} — {{.To}}, {{.Cycles}} циклов</span></h3>
+<p class="muted small">С чем сравнивается пресс: медиана и обычный разброс (5…95%) каждого признака в базовом периоде.
+    {{if .Q}}Найдено {{.Total}} из {{.All}}{{if gt .Total (len .Rows)}}, показано {{len .Rows}}{{end}}.{{else}}Без
+    поиска — ключевые показатели; поиском — любой из {{.All}} признаков.{{end}}</p>
+<input class="search" type="search" name="q" value="{{.Q}}" placeholder="поиск: MD5, усилие, pump62, temp…"
+    hx-get="/analysis/norm?op={{.Op}}" hx-trigger="input changed delay:300ms" hx-target="#an-norm">
+<table class="tbl small">
+    <tr>
+        <th>признак</th>
+        <th>медиана</th>
+        <th>5…95%</th>
+        <th>σ</th>
+        <th></th>
+    </tr>
+    {{range .Rows}}<tr>
+        <td>{{.Name}}<div class="muted">{{.Subsystem}}</div>
+        </td>
+        <td>{{v .Median}}</td>
+        <td class="nowrap">{{v .P5}} … {{v .P95}}</td>
+        <td>{{v .Sigma}}</td>
+        <td><a hx-get="/analysis/chart?op={{$.Op}}&f={{.Feature}}" hx-target="#an-chart" href="#an-chart">график</a>
+        </td>
+    </tr>{{else}}<tr>
+        <td colspan="5" class="muted">ничего не найдено</td>
+    </tr>{{end}}
+</table>

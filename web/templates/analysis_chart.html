@@ -1,0 +1,10 @@
+{{/* «Островок» графика признака: TypeScript (analysis.ts) возьмёт данные из
+/api/analysis/{op}/feature. */}}
+<div class="an-chart" data-analysis-chart data-op="{{.Op}}" data-f="{{.F}}">
+    <div class="muted pad">загрузка графика «{{.Name}}»…</div>
+</div>
+<div class="muted small hint">
+    точки — циклы, линия — медиана соседних циклов, полоса — норма 5…95%,
+    красные — аномальные циклы. Выделите участок — приблизить, двойной щелчок —
+    сбросить
+</div>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>press-go · циклы</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script src="/static/app.js" defer></script>
+</head>
+
+<body>
+    <header class="top">
+        <span class="brand">press-go</span>
+        <nav class="nav"><a href="/" class="on">Циклы</a><a href="/analysis">Анализ</a><a href="/piece">Заготовка</a><a
+                href="/admin">Настройки</a></nav>
+        <span class="muted">папка данных: {{.Data}}</span>
+    </header>
+    <div class="layout">
+        <aside class="side">
+            <!-- Поиск: HTMX сам шлёт GET /files?q=... через 300 мс после ввода
+         и при загрузке страницы — список приходит готовым HTML. -->
+            {{with .Machines}}<select class="search" name="m" title="машина" hx-get="/files" hx-trigger="change"
+                hx-target="#files" hx-include="[name='q']">
+                <option value="">все машины</option>{{range .}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+            </select>{{end}}
+            <input class="search" type="search" name="q" placeholder="176613, OP2, 20261118" hx-get="/files"
+                hx-trigger="load, input changed delay:300ms" hx-target="#files" hx-include="[name='m']">
+            <div id="files" class="files">
+                <div class="muted pad">загрузка…</div>
+            </div>
+        </aside>
+        <main id="main" class="main" {{with .Open}} hx-get="/cycle?f={{.}}{{range $.Feat}}&amp;feat={{.}}{{end}}"
+            hx-trigger="load" {{end}}>
+            <div class="empty">
+                <div class="empty-title">Выберите цикл слева</div>
+                <div class="muted">Откроется форма цикла: усилие, ход ползуна, давление и любые другие каналы.</div>
+            </div>
+        </main>
+    </div>
+</body>
+
+</html>

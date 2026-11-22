@@ -1,0 +1,62 @@
+<section class="cycle">
+  <div class="cycle-head">
+    <div>
+      <div class="cycle-title">{{if .Name.Op}}{{.Name.Op}} · {{end}}{{if .Name.HasIDs}}<a
+          href="/piece?n={{.Name.Piece}}" title="паспорт заготовки: её циклы на всех операциях">заготовка
+          {{.Name.Piece}}</a> · <a href="/piece?h={{.Name.Heat}}" title="все заготовки плавки">плавка
+          {{.Name.Heat}}</a>{{else}}{{.File}}{{end}}</div>
+      <div class="muted small">{{.File}}</div>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="muted">старт</span><b>{{.Start}}</b></div>
+      <div class="stat"><span class="muted">длительность</span><b>{{sec .Duration}} с</b></div>
+      <div class="stat"><span class="muted">шаг</span><b>{{ms .Step}} мс</b></div>
+      <div class="stat"><span class="muted">каналы</span><b>{{.NAna}} + {{.NDig}}</b></div>
+    </div>
+  </div>
+
+  {{if .Damage.Serious}}
+  <!-- Файл повреждён: записи съехали или оборваны. Испорченные куски пропущены при чтении. -->
+  <div class="dmg-summary">
+    <b>Файл повреждён — испорченные записи пропущены, графики показывают только исправные</b>
+    <div>{{.Damage}}</div>
+  </div>
+  {{end}}
+
+  {{if .Problems}}
+  <!-- Сводка: каналы, где сигнал пропал или сбоит. Неизменный канал — не «скучный»,
+       это может быть мёртвый датчик или обрыв (так нашли MD5). -->
+  <div class="sig-summary">
+    <b>Проблемы сигнала в этом цикле: {{len .Problems}}</b>
+    {{range .Problems}}<div class="sig-row"><span class="sig-dot"></span>{{if .Alias}}{{.Alias}} <span
+        class="muted small">{{.Name}}</span>{{else}}{{.Name}}{{end}} — {{.Signal.Label}}</div>{{end}}
+  </div>
+  {{end}}
+
+  <div class="cycle-body">
+    <!-- Любое изменение галочек → GET /cycle/chart?f=...&ch=...&ch=... → подмена #chart-area.
+         Форму собирает и отправляет HTMX, JavaScript для этого не нужен. -->
+    <div class="channels-wrap">
+      <!-- Переключатель вне формы: его изменение не должно перерисовывать графики.
+         Скрытие работает на чистом CSS (:has), без JavaScript. -->
+      <label class="toggle"><input type="checkbox" class="hide-const"> скрыть неизменные</label>
+      <form class="channels" hx-get="/cycle/chart" hx-trigger="change" hx-target="#chart-area">
+        <input type="hidden" name="f" value="{{.Rel}}">
+        {{range .Feat}}<input type="hidden" name="feat" value="{{.}}">{{end}}
+        {{range .Groups}}
+        <details{{if .Open}} open{{end}}>
+          <summary>{{.Name}} <span class="muted">{{len .Channels}}</span>{{if .Problems}} <span
+              class="sig-badge">{{.Problems}}</span>{{end}}</summary>
+          {{range .Channels}}
+          <label class="ch {{.Signal.Class}}"><input type="checkbox" name="ch" value="{{.Index}}" {{if
+              .Checked}}checked{{end}}> {{if .Alias}}{{.Alias}} <span
+              class="orig">{{.Name}}</span>{{else}}{{.Name}}{{end}}{{with .Signal.Label}}<span
+              class="sig-label">{{.}}</span>{{end}}</label>
+          {{end}}
+          </details>
+          {{end}}
+      </form>
+    </div>
+    <div id="chart-area" class="chart-area">{{template "chart.html" .Chart}}</div>
+  </div>
+</section>

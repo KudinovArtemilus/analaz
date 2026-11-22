@@ -1,0 +1,15 @@
+{{/* Фрагмент для HTMX: только список, без <html>. RelQ уже закодирован для URL —
+html/template не знает, что hx-get содержит адрес, и сам бы его не закодировал. */}}
+{{range .Items}}
+<a class="file" hx-get="/cycle?f={{.RelQ}}" hx-target="#main" href="#" {{with .Machine}} title="{{.}}" {{end}}>
+    <span class="op op-{{.Op}}">{{if .Op}}{{.Op}}{{else}}—{{end}}</span>
+    <span class="fname">{{.Name}}</span>
+    <span class="ftime">{{.Time}}</span>
+</a>
+{{else}}{{if not .More}}
+<div class="muted pad">ничего не найдено</div>
+{{end}}{{end}}
+<div class="muted pad small files-more">показано {{.Shown}} из {{.Found}}{{with .Next}}
+    · <a href="#" hx-get="{{.}}" hx-target="closest .files-more" hx-swap="outerHTML">показать ещё 300</a>{{end}}
+    {{if gt .Found 300}}<div>быстрее — поиском: номер заготовки или плавки (176613), дата (20261113), время
+        (20261113_04)</div>{{end}}</div>

@@ -1,0 +1,55 @@
+{{/* Отчёт за сутки — фрагмент для HTMX. Норма для суток — вся история до них (или хранимая). */}}
+<div class="day">
+  <div class="day-kpi small">
+    <span><b>{{.R.Cycles}}</b> циклов</span><span><b>{{.R.Production}}</b> рабочих</span>
+    <span><b>{{printf "%.1f" .R.DownH}}</b> ч простоя</span><span><b>{{.R.DieChanges}}</b> замен штампа</span>
+    <span{{if .R.Anomalies}} class="st-warn" {{end}}><b>{{len .R.Anomalies}}</b> аномальных</span>
+  </div>
+  <div class="muted small">Норма: {{.R.BaseNote}}</div>
+
+  {{if .Bad}}
+  {{range .Bad}}<div class="day-unit st-{{.Status}} small"><b>{{.Label}}</b> · {{.Name}}{{with .Facts}}<div
+      class="muted">{{index . 0}}</div>{{end}}</div>{{end}}
+  {{end}}
+  <div class="muted small">в норме: {{.NOK}} узлов</div>
+
+  {{with .Rows}}
+  <table class="tbl small">
+    <tr>
+      <th>показатель</th>
+      <th>за сутки</th>
+      <th>норма</th>
+      <th>5…95%</th>
+      <th>z</th>
+    </tr>
+    {{range .}}<tr class="{{if eq .Mark " 🔴"}}st-alarm{{else if eq .Mark "🟡" }}st-warn{{end}}">
+      <td>{{.Name}}</td>
+      <td>{{.Value}}</td>
+      <td>{{.Median}}</td>
+      <td class="nowrap">{{.Range}}</td>
+      <td>{{.Z}}</td>
+    </tr>{{end}}
+  </table>
+  <div class="muted small">выделены показатели вне нормы 5…95%: янтарным — слабо, красным — больше 4σ</div>
+  {{end}}
+
+  {{with .Anoms}}
+  <details>
+    <summary class="small">аномальные циклы суток: {{len .}}</summary>
+    {{range .}}<div class="small"><b>{{.Time.Format "15:04:05"}}</b> {{.What}}</div>{{end}}
+  </details>
+  {{end}}
+
+  {{with .R.Stops}}<div class="small"><b>Остановы:</b>{{range .}}<div>{{.}}</div>{{end}}</div>{{end}}
+
+  {{/* 6.2з: сутки по часам — данные прямо здесь, рисует hourly.ts */}}
+  {{if or .Hourly.Plots .Hourly.PerHour}}
+  <details class="day-hourly" open>
+    <summary class="small"><b>Сутки по часам</b> <span class="muted">точки — рабочие циклы, линия — медиана за час,
+        серая полоса — норма 5…95%</span></summary>
+    <div data-day-hourly>
+      <script type="application/json">{{.Hourly}}</script>
+    </div>
+  </details>
+  {{end}}
+</div>

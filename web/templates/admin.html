@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>press-go · настройки</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/vendor/htmx.min.js"></script>
+</head>
+
+<body>
+  <header class="top">
+    <span class="brand">press-go</span>
+    <nav class="nav"><a href="/">Циклы</a><a href="/analysis">Анализ</a><a href="/piece">Заготовка</a><a href="/admin"
+        class="on">Настройки</a></nav>
+    {{with .Path}}<span class="muted small">файл: {{.}}</span>{{end}}
+  </header>
+  <main class="page">
+    {{if .NoConfig}}
+    <div class="empty">
+      <div class="empty-title">Настройки не подключены</div>
+      <div class="muted">Запустите сервер с файлом настроек:
+        <code>server.exe -config C:\press-go\pressgo.json</code><br>Если файла нет, он будет создан.
+      </div>
+    </div>
+    {{else}}
+    {{with .Error}}<div class="card st-alarm"><b>Не сохранено:</b> {{.}}</div>{{end}}
+    {{with .Saved}}{{if eq . "archive-run"}}<div class="card note">Проход архива запущен — обновите страницу через
+      минуту, итог в «Хранение».</div>
+    {{else if eq . "feat-run"}}<div class="card note">Подсчёт признаков запущен — ход виден в «Признаки новых циклов»,
+      обновите страницу.</div>
+    {{else if eq . "feat-busy"}}<div class="card note">Проход уже идёт — второй параллельно не запускается. Что он
+      делает сейчас — в «Признаки новых циклов».</div>
+    {{else}}<div class="card note">Сохранено{{if ne . "archive"}}: профиль {{.}}{{end}}. Папку таблиц признаков сервер
+      подхватывает сразу; папки .shp для просмотра циклов — после перезапуска сервера.</div>{{end}}{{end}}
+
+    <p class="muted small">Админка открывается только на этом компьютере. Исходные папки с .shp press-go только читает —
+      ничего в них не пишет и не удаляет.</p>
+
+    {{range .C.Profiles}}
+    <section class="card">
+      <h3>{{.Name}} <span class="muted small">{{.ID}}{{if not .Enabled}} · выключен{{end}}</span></h3>
+      <form method="post" action="/admin/profile" class="form">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <label>Название <input name="name" value="{{.Name}}" required></label>
+        <label>Тип машины <select name="kind">
+            {{$k := .Kind}}{{range $v, $t := kinds}}<option value="{{$v}}" {{if eq $v $k}} selected{{end}}>{{$t}}
+            </option>{{end}}
+          </select></label>
+        <label>Операции <input name="ops" value="{{join .Ops " , "}}" placeholder="OP1, OP2"></label>
+        <label>Часовой пояс, ч <input name="tz" value="{{.TZ}}" size="3"></label>
+        <label class="wide">Папки с .shp — по одной на строку
+          <textarea name="sources" rows="3" placeholder="\\recorder\shp">{{join .Sources "\n"}}</textarea></label>
+        <label class="inline"><input type="checkbox" name="enabled" {{if .Enabled}} checked{{end}}> включён</label>
+        <div class="actions">
+          <button type="submit">Сохранить</button>
+          <button type="button" hx-get="/admin/check?id={{.ID}}" hx-target="#check-{{.ID}}">Проверить папки</button>
+          <a href="#aliases" hx-get="/admin/aliases?id={{.ID}}" hx-target="#aliases">Названия каналов</a>
+        </div>
+        <div id="check-{{.ID}}"></div>
+      </form>
+    </section>
+    {{end}}
+
+    <details class="card">
+      <summary>Добавить профиль (пресс 5, КПС…)</summary>
+      <form method="post" action="/admin/profile" class="form">
+        <label>id (латиница) <input name="id" placeholder="press5" pattern="[a-z0-9_\-]{1,32}" required></label>
+        <label>Название <input name="name" placeholder="Пресс 5" required></label>
+        <label>Тип машины <select name="kind">{{range $v, $t := kinds}}<option value="{{$v}}">{{$t}}</option>
+            {{end}}</select></label>
+        <label>Операции <input name="ops" placeholder="OP1"></label>
+        <label>Часовой пояс, ч <input name="tz" value="5" size="3"></label>
+        <label class="wide">Папки с .shp — по одной на строку <textarea name="sources" rows="2"></textarea></label>
+        <label class="inline"><input type="checkbox" name="enabled"> включён</label>
+        <div class="actions"><button type="submit">Добавить</button></div>
+      </form>
+    </details>
+
+    <section class="card" id="archive">
+      <h3>Хранение</h3>
+      <form method="post" action="/admin/archive" class="form">
+        <label class="wide">Папка данных службы (архив, признаки, база) <input name="data_dir"
+            value="{{.C.DataDir}}"></label>
+        <label class="wide">Таблицы признаков для анализа (пока — results у run.py) <input name="features_dir"
+            value="{{.C.FeaturesDir}}"></label>
+        <label>Все .shp хранить, дней <input name="keep_days" value="{{.C.Archive.KeepDays}}" size="4"> <span
+            class="muted small">пока не действует; 0 — только отобранное</span></label>
+        <label>Фон — каждый N-й цикл (по ходу штампа) <input name="keep_every" value="{{.C.Archive.KeepEvery}}"
+            size="4"></label>
+        <label>Потолок архива, ГБ <input name="max_gb" value="{{.C.Archive.MaxGB}}" size="5"></label>
+        <div class="actions"><button type="submit">Сохранить</button></div>
+      </form>
+      <p class="muted small">Буфер регистратора хранит около двух недель. В архив (<b>папка
+          данных\archive\&lt;профиль&gt;</b>) раз в 10 минут копируется то, что пригодится потом: самые сильные
+        аномальные циклы (до 20 в сутки на операцию), 10 циклов перед каждым остановом и 5 после пуска, повреждённые
+        файлы, начало «отрезков вне нормы» и нового рецепта, и фон — каждый N-й цикл. Сжатие в ~3 раза, проверка копии
+        по SHA-256. <b>Из буфера ничего не удаляется и не переносится.</b> Архив сам ничего не удаляет: дорос до потолка
+        — новое не пишется. Оценка: ~0,45 ГБ в сутки на OP1+OP2.</p>
+      {{with .Arch}}
+      <div class="arch-status small">
+        {{if .Note}}<div class="note">Архив не работает: {{.Note}}</div>
+        {{else}}
+        <div><b>Архив:</b> {{.Files}} файлов, {{printf "%.2f" (gb .Used)}} из {{printf "%.0f" (gb .Max)}} ГБ (потолок
+          общий на все профили) <span class="muted">· {{.Root}}</span></div>
+        {{if gt (len .Per) 1}}{{range .Per}}<div class="muted">{{.Name}}: {{.Files}} файлов, {{printf "%.2f" (gb
+          .Used)}} ГБ · {{.Root}}</div>{{end}}{{end}}
+        {{if not .At.IsZero}}<div class="muted">Последний проход {{.At.Format "02.01 15:04:05"}} ({{.Took}}): сохранено
+          {{.Saved}}, уже было {{.Known}}{{if .Missing}}, <b>пропало из буфера до сохранения {{.Missing}}</b>{{end}}{{if
+          .NoRel}}, <b>вне папок профилей {{.NoRel}}</b>{{end}}</div>{{end}}
+        {{if and .NoRel (not .Saved) (not .Known)}}<div class="st-warn">Ни один отобранный файл не лежит в папках
+          профилей: таблицы признаков сняты с другого пути (например, через подключённый диск, а в профиле — сетевой
+          путь). Пути в таблице и папки профиля должны совпадать.</div>{{end}}
+        {{if .Full}}<div class="st-alarm">Архив дорос до потолка — новые файлы не сохраняются. Увеличьте потолок или
+          освободите место.</div>{{end}}
+        {{range .Errors}}<div class="st-warn">{{.}}</div>{{end}}
+        {{end}}
+      </div>
+      {{end}}
+      <form method="post" action="/admin/archive/run" class="form">
+        <div class="actions"><button type="submit">Сохранить сейчас</button></div>
+      </form>
+    </section>
+
+    <section class="card" id="features">
+      <h3>Признаки новых циклов</h3>
+      <p class="muted small">Сервер сам смотрит в папки с .shp всех включённых профилей{{with .Feat.Every}} раз в
+        {{printf "%.0f" .Minutes}} мин{{end}}, считает признаки по новым файлам и дописывает таблицу
+        <b>features_&lt;OP&gt;.csv.gz</b> в папке таблиц — анализ и архив подхватывают её сами. За проход — не больше
+        {{featPerPass}} файлов на операцию: сначала новые файлы всех машин, потом пропуски в истории (пока буфер их не
+        удалил). Файлы моложе 2 минут ждут следующего прохода — регистратор, возможно, ещё пишет. Строки из таблицы,
+        сделанной утилитой extract (features_quick…), переносятся один раз — сама она не меняется. <b>Папки с .shp
+          только читаются.</b>
+      </p>
+      {{with .Feat}}
+      <div class="arch-status small">
+        {{if .Running}}<div class="note"><b>Идёт проход</b> с {{.Started.Format "15:04:05"}}: {{.Doing}}</div>{{end}}
+        {{if .Note}}<div class="note">Не работает: {{.Note}}</div>
+        {{else if .At.IsZero}}<div class="muted">Первый проход ещё не закончен — итог по машинам появится в конце
+          прохода.</div>
+        {{else}}
+        <div class="muted">Последний проход {{.At.Format "02.01 15:04:05"}} ({{.Took}})</div>
+        {{range .Ops}}
+        <div><b>{{with .Profile}}{{.}} · {{end}}{{.Op}}:</b> {{.Rows}} циклов в таблице{{if .Added}}, добавлено
+          {{.Added}}{{end}}{{if .Redone}}, пересчитано по новой версии признаков {{.Redone}}{{end}}{{if .Damaged}}
+          (повреждённых {{.Damaged}}){{end}}{{if .Merged}}, перенесено {{.Merged}} из {{.From}}{{end}}{{if .Todo}},
+          <b>осталось посчитать {{.Todo}}</b>{{if .Stale}} (из них пересчёт по новой версии
+          {{.Stale}}){{end}}{{end}}{{if .Young}}, ждут дозаписи {{.Young}}{{end}}{{if not (or .Added .Redone .Merged
+          .Todo .Err)}} — новых нет{{end}} <span class="muted">· {{.Table}}</span>
+        </div>
+        {{with .Err}}<div class="st-alarm">{{.}}</div>{{end}}
+        {{range .Errors}}<div class="st-warn">{{.}}</div>{{end}}
+        {{end}}
+        {{end}}
+      </div>
+      {{end}}
+      <form method="post" action="/admin/features/run" class="form">
+        <div class="actions"><button type="submit">Посчитать сейчас</button></div>
+      </form>
+    </section>
+
+    <section class="card" id="aliases">
+      <div class="muted small">Названия каналов: нажмите «Названия каналов» у профиля.</div>
+    </section>
+    {{end}}
+  </main>
+</body>
+
+</html>

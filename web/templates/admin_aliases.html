@@ -1,0 +1,60 @@
+<h3>Названия каналов · {{.P.Name}}</h3>
+<p class="muted small">
+    Своё название показывается везде: в списке каналов, на графиках, в анализе.
+    Исходное имя остаётся рядом мелким шрифтом. Пустое поле — вернуть исходное.
+    Сохраняется сразу при выходе из поля. {{.Note}}.
+</p>
+<input
+    class="search"
+    type="search"
+    name="q"
+    value="{{.Q}}"
+    placeholder="поиск: MD5, усилие, pump…"
+    hx-get="/admin/aliases?id={{.P.ID}}"
+    hx-trigger="input changed delay:300ms"
+    hx-target="#aliases"
+/>
+<table class="tbl small">
+    <tr>
+        <th>исходное имя</th>
+        <th>тип</th>
+        <th>своё название</th>
+        <th></th>
+    </tr>
+    {{range .Rows}}
+    <tr>
+        <td>
+            {{.Name}}{{with .Default}}
+            <div class="muted">{{.}}</div>
+            {{end}}
+        </td>
+        <td class="muted nowrap">{{.Kind}} · {{.Group}}</td>
+        <td>
+            <form
+                hx-post="/admin/alias"
+                hx-trigger="change"
+                hx-target="next .saved"
+                hx-swap="innerHTML"
+            >
+                <input type="hidden" name="id" value="{{$.P.ID}}" /><input
+                    type="hidden"
+                    name="name"
+                    value="{{.Name}}"
+                />
+                <input
+                    class="alias"
+                    name="alias"
+                    value="{{.Alias}}"
+                    maxlength="120"
+                />
+            </form>
+        </td>
+        <td class="saved nowrap"></td>
+    </tr>
+    {{end}}
+</table>
+{{if gt .Total (len .Rows)}}
+<p class="muted small">
+    Показано {{len .Rows}} из {{.Total}} — уточните поиск.
+</p>
+{{end}}

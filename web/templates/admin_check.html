@@ -1,0 +1,10 @@
+{{range .Checks}}
+<div class="small {{if .OK}}{{else}}st-alarm{{end}} check">
+    <b>{{.Path}}</b> — {{if .OK}}доступна, .shp: {{.Files}}{{if .More}}+ (дальше
+    не считали){{end}}{{with .Newest}}, самый свежий:
+    {{.}}{{end}}{{else}}{{.Error}}{{end}}
+    <span class="muted">({{.Took}})</span>
+</div>
+{{else}}
+<div class="small st-warn check">В профиле не указано ни одной папки</div>
+{{end}}

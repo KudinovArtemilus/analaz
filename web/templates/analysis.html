@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>press-go · анализ{{with .Op}} {{.}}{{end}}</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script src="/static/app.js" defer></script>
+</head>
+
+<body>
+    <header class="top">
+        <span class="brand">press-go</span>
+        <nav class="nav"><a href="/">Циклы</a><a href="/analysis" class="on">Анализ</a><a href="/piece">Заготовка</a><a
+                href="/admin">Настройки</a></nav>
+        {{if .Ops}}<nav class="tabs">{{$op := .Op}}{{range .Ops}}<a href="/analysis?op={{.}}" {{if eq . $op}} class="on"
+                {{end}}>{{.}}</a>{{end}}</nav>{{end}}
+    </header>
+
+    <main class="page">
+        {{if not .Enabled}}
+        <div class="empty">
+            <div class="empty-title">Анализ не включён</div>
+            <div class="muted">Укажите папку с таблицами признаков (features_*_OP1.csv.gz) на странице <a
+                    href="/admin">Настройки</a> → «Хранение».</div>
+        </div>
+        {{else if .Error}}
+        <div class="error">{{.Error}}</div>
+        {{else if not .Op}}
+        <div class="empty">
+            <div class="muted">В папке нет таблиц features*_OP1.csv.gz — запустите run.py (extract)</div>
+        </div>
+        {{else}}
+        {{$op := .Op}}{{$machine := .Machine}}{{$noUnits := .NoUnits}}{{with .S}}
+        <!-- Шапка: что анализируем и по какой норме. Без этого цифры нельзя правильно понять. -->
+        <section class="an-head">
+            <div>
+                <div class="an-title">{{if $machine}}{{$machine}}{{else}}Пресс{{end}} {{.Op}} · {{.Period}}</div>
+                <div class="muted small">{{.File}} · циклов {{.Cycles}}, рабочих {{.Prod}} · посчитано {{.Computed}}
+                </div>
+            </div>
+            <div class="an-norm small">
+                {{if .Norm.Stored}}<b>Норма: хранимая</b>{{else}}<b>Норма: первые 20% данных</b>{{end}}
+                <div class="muted">{{.Norm.From}} — {{.Norm.To}}, {{.Norm.Cycles}} циклов{{with .Norm.Note}} ·
+                    {{.}}{{end}}</div>
+            </div>
+        </section>
+        {{if $noUnits}}<div class="note small"><b>Узлы этой машины ещё не описаны</b> — светофор по узлам и диагноз
+            пустые, и «0 в норме» не значит «всё хорошо». Уже работают: аномалии, тренды, остановы, датчики и карта
+            здоровья — пока по сырым признакам каналов (min/mean/max/std). Узлы и признаки с физическим смыслом —
+            следующий шаг (К2–К3).</div>{{end}}
+        {{if .ShortData}}<div class="note small">Данных меньше недели — прогнозы и тренды предварительные. Сравнение
+            одинаковых узлов между собой надёжно уже сейчас.</div>{{end}}
+
+        <!-- Сводка. Цвет — только у ненулевых тревог. -->
+        <section class="an-counts">
+            <div class="cnt{{if .Counts.Alarm}} st-alarm{{end}}"><b>{{.Counts.Alarm}}</b>проблема</div>
+            <div class="cnt{{if .Counts.Warn}} st-warn{{end}}"><b>{{.Counts.Warn}}</b>наблюдать</div>
+            <div class="cnt"><b>{{.Counts.OK}}</b>в норме</div>
+            <div class="cnt{{if .Lost}} st-alarm{{end}}"><b>{{len .Lost}}</b>сигнал пропал</div>
+            <div class="cnt"><b>{{.Anomalies}}</b>аномальных циклов</div>
+            <div class="cnt"><b>{{.Trends}}</b>трендов</div>
+        </section>
+        {{end}}
+
+        <!-- Новые правила (в Python их нет): узел не похож на соседей; отрезок работы вне нормы -->
+        {{if or .Peers .Runs}}
+        <section class="card">
+            <h3>Что отличается: узлы и смены</h3>
+            {{with .Peers}}
+            <h4 class="sub">Узел не похож на однотипных соседей</h4>
+            <p class="muted small">Одинаковые узлы (6 дренажей, 12 насосов) сравниваются друг с другом за последние 20%
+                циклов. Это ловит то, что обычный анализ не видит: если узел «не такой» с первого дня, норма это
+                впитала.</p>
+            <ul class="rules small">
+                {{range .}}<li class="{{if ne .Kind " always"}}st-warn{{end}}">{{if eq .Kind "new"}}<b>стал
+                        отличаться</b>{{else if eq .Kind "worse"}}<b>давно, но хуже</b>{{else if eq .Kind
+                    "nobase"}}<b>нет нормы</b>{{else}}<span class="muted">давно</span>{{end}} · {{.Text}}
+                    <a hx-get="/analysis/chart?op={{$op}}&f={{.Feature}}" hx-target="#an-chart"
+                        href="#an-chart">график</a>
+                </li>{{end}}
+            </ul>
+            {{end}}
+            {{with .Runs}}
+            <h4 class="sub">Отрезок работы вне нормы</h4>
+            <p class="muted small">Отрезок — работа между остановами. Здесь признаки, которые <b>весь отрезок</b>
+                держались за 6σ от нормы: это режим, а не единичный выброс. «С пуска» — уже первые 10 циклов после пуска
+                были такими. Отрезков в норме: {{$.RunsInNorm}}.</p>
+            <table class="tbl small">
+                <tr>
+                    <th>отрезок</th>
+                    <th>циклов</th>
+                    <th>что весь отрезок вне нормы</th>
+                </tr>
+                {{range .}}<tr class="st-warn">
+                    <td class="nowrap">{{.From}} — {{.To}}</td>
+                    <td>{{.Cycles}}</td>
+                    <td>{{range $i, $f := .Feats}}{{if $i}}; {{end}}{{$f.Name}} {{z $f.Z}} <span
+                            class="muted">{{$f.When}}</span>{{end}}{{if .More}} <span class="muted">и ещё
+                            {{.More}}</span>{{end}}</td>
+                </tr>{{end}}
+            </table>
+            {{end}}
+        </section>
+        {{end}}
+
+        <!-- 6.2б: карта здоровья подсистем (ECharts, health.ts) -->
+        <section class="card">
+            <h3>Карта здоровья подсистем</h3>
+            <p class="muted small">Клетка — насколько подсистема в этот день отличалась от нормы (среднее трёх самых
+                отклонившихся признаков, в σ). Серое — норма, к красному — сильнее отклонение. Щелчок по клетке — какие
+                признаки отклонились.</p>
+            <div class="health" data-health data-op="{{$op}}">
+                <div class="muted small pad">загрузка карты…</div>
+            </div>
+            <div id="hm-cell"></div>
+        </section>
+
+        <!-- И1: установки штампа (dies.go) -->
+        {{with .Dies}}
+        <section class="card">
+            <h3>Штампы</h3>
+            <p class="muted small">Номера штампа в записи нет — есть время его замены, по нему видна каждая
+                <b>установка</b> штампа. Штампы разные (своя геометрия и нагрузка), и общая норма это смазывает: усилие,
+                обычное для одного штампа, для другого — отклонение. Поэтому у каждой установки — её показатели против
+                общей нормы и <b>дрейф</b>: конец работы штампа против его же начала (его собственная норма; так видно
+                износ штампа). Дрейф считается, когда циклов ≥ 30.</p>
+            <table class="tbl small">
+                <tr>
+                    <th>замена штампа</th>
+                    <th>рецепт</th>
+                    <th>работал</th>
+                    <th>циклов</th>
+                    <th>ходов</th>{{range $.DieKey}}<th>{{.}}</th>{{end}}<th>дрейф за время работы штампа (было → стало)
+                    </th>
+                </tr>
+                {{range .}}<tr>
+                    <td class="nowrap"><b>{{.Change}}</b></td>
+                    <td class="nowrap{{if .OtherRecipe}} st-warn{{end}}">{{.Recipe}}{{if .OtherRecipe}}
+                        <b>другой</b>{{end}}</td>
+                    <td class="nowrap">{{.From}} — {{.To}}</td>
+                    <td>{{.Cycles}}</td>
+                    <td>{{v .Strokes}}</td>
+                    {{range .Key}}<td class="nowrap {{zcls .Z 3.0 6.0}}">{{v .Value}} <span class="muted">{{z
+                            .Z}}</span></td>{{end}}
+                    <td>{{if not .HasDrift}}<span class="muted">мало циклов</span>{{else if not .Drift}}<span
+                            class="muted">нет</span>{{else}}{{range $i, $d := .Drift}}{{if $i}}; {{end}}{{$d.Name}} {{v
+                        $d.Base}} → {{v $d.Now}} ({{z $d.Z}}){{end}}{{if .More}} <span class="muted">и ещё
+                            {{.More}}</span>{{end}}{{end}}</td>
+                </tr>{{end}}
+            </table>
+            <p class="muted small">σ у показателей — от общей нормы операции: подсветка значит «этот штамп отличается от
+                обычного».
+                <b>Рецепт</b> — уставки, постоянные внутри установки штампа: скорость опускания ползуна, мм/с / позиция
+                нижних цилиндров, мм / позиция SCu. Типа колеса в записи нет, но, похоже, он виден по рецепту. Основной
+                рецепт операции — {{$.MainRecipe}}; общая норма построена по нему, поэтому циклы «другого» рецепта
+                выглядят отклонением, даже если с оборудованием всё в порядке.
+            </p>
+            <div data-dies data-op="{{$op}}">
+                <div class="muted small pad">загрузка карты…</div>
+            </div>
+        </section>
+        {{end}}
+
+        <!-- Здоровье по плавкам → по заготовкам плавки (heats.ts) -->
+        <section class="card">
+            <h3>Здоровье по плавкам</h3>
+            <p class="muted small">Та же карта здоровья подсистем, но столбцы — плавки (по номеру из имени файла цикла),
+                в порядке времени. Щелчок по плавке — снизу её заготовки; щелчок по заготовке — паспорт. Так видно, на
+                какой плавке и на какой заготовке пресс работал не как обычно, даже не зная номеров. Найти по номеру —
+                страница <a href="/piece">Заготовка</a>.</p>
+            <div data-heats data-op="{{$op}}">
+                <div class="muted small pad">загрузка…</div>
+            </div>
+        </section>
+
+        <!-- 6.2в: группы однотипных узлов (ECharts, groups.ts) -->
+        <section class="card">
+            <h3>Однотипные узлы</h3>
+            <p class="muted small">Одинаковые узлы на одном графике: шесть дренажей, двенадцать насосов, одиннадцать
+                сервоклапанов… Их линии должны идти рядом — кто отбился от остальных, тот и кандидат на износ. Щелчок по
+                имени в легенде — скрыть линию.</p>
+            <div class="groups" data-groups data-op="{{$op}}">
+                <div class="muted small pad">загрузка групп…</div>
+            </div>
+        </section>
+
+        <!-- 6.2д: признаки перед остановами (ECharts, prestops.ts) -->
+        <section class="card">
+            <h3>Как ведут себя признаки перед остановами</h3>
+            <p class="muted small">12 самых долгих простоев, совмещённых по моменту останова (0 — последний цикл перед
+                паузой). Показаны 4 признака, которые чаще всего отклонялись перед остановами, в σ от нормы (медиана по
+                5 циклам). Если линии систематически уходят из серой полосы за N часов до 0 — это и есть «как умирает»
+                узел и запас времени на предупреждение. Колесо мыши — приблизить, щелчок по останову в легенде — скрыть.
+            </p>
+            <div data-prestops data-op="{{$op}}">
+                <div class="muted small pad">загрузка…</div>
+            </div>
+        </section>
+
+        <!-- 6.2г: было/стало, что меняется вместе, связи и длительность цикла (ECharts, compare.ts) -->
+        <section class="card">
+            <h3>Было / стало и связи</h3>
+            <div data-compare data-op="{{$op}}">
+                <div class="muted small pad">загрузка…</div>
+            </div>
+        </section>
+
+        <div class="an-grid">
+            <div class="an-col">
+                {{with .S.Lost}}
+                <!-- «Сигнал пропал»: канал показывает ровно 0, а однотипные соседи работают. -->
+                <section class="card st-alarm">
+                    <h3>Сигнал пропал</h3>
+                    {{range .}}<div class="row"><b>{{.Name}}</b> <span class="muted small">{{.Signal}}</span>
+                        <div class="small">ровно 0 {{if .FromStart}}с начала данных{{else}}с {{.Since}}{{end}},
+                            однотипные каналы работают — проверить датчик, кабель, канал ПЛК</div>
+                        <a class="small" hx-get="/analysis/chart?op={{$op}}&f={{.Feature}}" hx-target="#an-chart"
+                            href="#an-chart">график</a>
+                    </div>{{end}}
+                </section>
+                {{end}}
+
+                {{range .Bad}}
+                <section class="card st-{{.Status}}">
+                    <h3>{{.Name}} <span class="tag">{{.Label}}</span> <span class="muted small">{{.Group}}</span></h3>
+                    <ul>{{range .Facts}}<li>{{.}}</li>{{end}}{{range .Forecast}}<li class="fc">⏱ {{.}}</li>{{end}}</ul>
+                    <p class="small"><b>Вероятная причина:</b> {{.Cause}}</p>
+                    <p class="small"><b>Что проверить:</b> {{.Check}}</p>
+                    {{with .Feats}}<div class="feats small">график: {{range .}}<a
+                            hx-get="/analysis/chart?op={{$op}}&f={{.Feature}}" hx-target="#an-chart"
+                            href="#an-chart">{{.Name}}</a>{{end}}</div>{{end}}
+                </section>
+                {{end}}
+
+                {{with .OK}}
+                <details class="card">
+                    <summary>В норме: {{len .}} узлов</summary>
+                    <div class="ok-list small">{{range .}}<span>{{.Name}}{{range $i, $f := .Feats}}{{if eq $i 0}} <a
+                                hx-get="/analysis/chart?op={{$op}}&f={{$f.Feature}}" hx-target="#an-chart"
+                                href="#an-chart">▸</a>{{end}}{{end}}</span>{{end}}</div>
+                </details>
+                {{end}}
+
+                {{with .S.Notes}}
+                <section class="card">
+                    <h3>Наблюдения без тревоги</h3>
+                    <ul class="small">{{range .}}<li>{{.}}</li>{{end}}</ul>
+                </section>
+                {{end}}
+            </div>
+
+            <div class="an-col">
+                <!-- График признака: точки — циклы, линия — медиана соседних циклов, полоса — норма 5…95%. -->
+                <section class="card">
+                    <div id="an-chart">{{if .First}}<div hx-get="/analysis/chart?op={{$op}}&f={{.First}}"
+                            hx-trigger="load" hx-target="this" hx-swap="outerHTML">
+                            <div class="muted pad">загрузка…</div>
+                        </div>{{else}}<div class="muted pad">Выберите признак — «график» у узла или тренда</div>{{end}}
+                    </div>
+                </section>
+
+                {{with .Trends}}
+                <section class="card">
+                    <h3>Медленные изменения (тренды)</h3>
+                    <table class="tbl small">
+                        <tr>
+                            <th>признак</th>
+                            <th>ρ</th>
+                            <th>сейчас от нормы</th>
+                            <th></th>
+                        </tr>
+                        {{range .}}<tr>
+                            <td>{{.Name}}{{with .Why}}<div class="muted">{{.}}</div>{{end}}</td>
+                            <td>{{printf "%+.2f" .Rho}}</td>
+                            <td>{{z .Shift}}</td>
+                            <td><a hx-get="/analysis/chart?op={{$op}}&f={{.Feature}}" hx-target="#an-chart"
+                                    href="#an-chart">график</a></td>
+                        </tr>{{end}}
+                    </table>
+                </section>
+                {{end}}
+
+                <section class="card">
+                    <h3>Отчёт за сутки</h3>
+                    <select name="d" hx-get="/analysis/day?op={{$op}}" hx-target="#an-day" hx-trigger="load, change">
+                        {{range .Days}}<option value="{{.}}">{{.}}</option>{{end}}
+                    </select>
+                    <div id="an-day">
+                        <div class="muted pad">загрузка…</div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        {{with .Anoms}}
+        <section class="card">
+            <h3>Аномальные циклы <span class="muted small">сильнейшие {{len .}} из {{$.AnomTotal}} · цикл отличается от
+                    соседних больше чем на 6σ</span></h3>
+            <table class="tbl small">
+                <tr>
+                    <th>время</th>
+                    <th>score</th>
+                    <th>что не так (значение / соседние циклы)</th>
+                    <th></th>
+                </tr>
+                {{range .}}<tr>
+                    <td class="nowrap">{{.Time}}</td>
+                    <td>{{printf "%.0f" .Score}}</td>
+                    <td>{{range $i, $r := .Reasons}}{{if $i}}; {{end}}{{$r.Name}}: {{v $r.Value}} / {{v $r.Rm}} ({{z
+                        $r.Z}}){{end}}</td>
+                    <td class="nowrap">{{if .Open}}<a
+                            href="/?open={{.Open}}{{range .Reasons}}&amp;feat={{.Feature}}{{end}}" target="_blank"
+                            title="откроется с каналами виновников на графике">открыть цикл</a>{{else}}<span
+                            class="muted">{{.File}}</span>{{end}}</td>
+                </tr>{{end}}
+            </table>
+        </section>
+        {{end}}
+
+        <!-- 6.2а: что анализ уже посчитал -->
+        <div class="an-grid">
+            <div class="an-col">
+                {{with .Culprits}}
+                <section class="card">
+                    <h3>Чаще всего делают цикл аномальным <span class="muted small">топ-{{len .}} признаков</span></h3>
+                    <p class="muted small">Если признак «виноват» в десятках процентов циклов, это скорее шумный признак
+                        или другой режим работы, чем поломка в каждом цикле. Такие — первые кандидаты на улучшение
+                        метода.</p>
+                    <table class="tbl small">
+                        <tr>
+                            <th>признак</th>
+                            <th>подсистема</th>
+                            <th>циклов</th>
+                            <th>доля</th>
+                            <th></th>
+                        </tr>
+                        {{range .}}<tr>
+                            <td>{{.Name}}</td>
+                            <td class="muted">{{.Subsystem}}</td>
+                            <td>{{.Count}}</td>
+                            <td>{{printf "%.0f" .Pct}}%</td>
+                            <td><a hx-get="/analysis/chart?op={{$op}}&f={{.Feature}}" hx-target="#an-chart"
+                                    href="#an-chart">график</a></td>
+                        </tr>{{end}}
+                    </table>
+                </section>
+                {{end}}
+                <section class="card">
+                    <h3>Здоровье датчиков</h3>
+                    {{with .Sensors}}
+                    <table class="tbl small">
+                        <tr>
+                            <th>сигнал</th>
+                            <th>проблема</th>
+                            <th>в норме</th>
+                            <th>сейчас</th>
+                        </tr>
+                        {{range .}}<tr class="st-warn">
+                            <td>{{.Signal}}</td>
+                            <td>{{.Problem}}</td>
+                            <td>{{v .Base}}</td>
+                            <td>{{v .Now}}</td>
+                        </tr>{{end}}
+                    </table>
+                    {{else}}<p class="muted small">Замерших каналов и каналов с мусором в последний период нет. Учтите:
+                        эта проверка сравнивает с нормой и не видит датчик, сломанный уже в базовом периоде (так с MD5),
+                        — такие ловит «Сигнал пропал».</p>{{end}}
+                </section>
+            </div>
+            <div class="an-col">
+                <section class="card">
+                    <h3>Остановы <span class="muted small">пауза между циклами больше {{printf "%.0f" .StopThr}}
+                            мин</span></h3>
+                    {{with .StopList}}
+                    <table class="tbl small">
+                        <tr>
+                            <th>останов</th>
+                            <th>пуск</th>
+                            <th>простой</th>
+                            <th>что отклонялось за 50 циклов до останова (медиана / норма)</th>
+                        </tr>
+                        {{range .}}<tr>
+                            <td class="nowrap">{{.From}}</td>
+                            <td class="nowrap">{{.Resume}}</td>
+                            <td class="nowrap">{{printf "%.1f" .Hours}} ч</td>
+                            <td>{{range $i, $r := .Before}}{{if $i}}; {{end}}{{$r.Name}}: {{v $r.Value}} / {{v $r.Rm}}
+                                ({{z $r.Z}}){{else}}<span class="muted">ничего заметного</span>{{end}}</td>
+                        </tr>{{end}}
+                    </table>
+                    {{else}}<p class="muted small">Остановов нет.</p>{{end}}
+                    {{with .Pre}}
+                    <h3 class="sub">Что чаще отклонялось перед остановами</h3>
+                    <table class="tbl small">
+                        <tr>
+                            <th>признак</th>
+                            <th>перед сколькими остановами</th>
+                            <th></th>
+                        </tr>
+                        {{range .}}<tr>
+                            <td>{{.Name}} <span class="muted">{{.Subsystem}}</span></td>
+                            <td>{{.Count}} ({{printf "%.0f" .Pct}}%)</td>
+                            <td><a hx-get="/analysis/chart?op={{$op}}&f={{.Feature}}" hx-target="#an-chart"
+                                    href="#an-chart">график</a></td>
+                        </tr>{{end}}
+                    </table>
+                    {{end}}
+                </section>
+                <section class="card" id="an-norm">
+                    <div hx-get="/analysis/norm?op={{$op}}" hx-trigger="load" hx-target="#an-norm">
+                        <div class="muted small">загрузка профиля нормы…</div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        {{with .S.Dropped}}
+        <details class="card small">
+            <summary>Выброшено повреждённых циклов: {{len .}} (физически невозможные значения — проверьте файлы shpinfo)
+            </summary>
+            {{range .}}<div>{{.Time}} · {{.File}} · {{.Feats}} признаков ≥ 1000σ, худший {{.Worst}}</div>{{end}}
+        </details>
+        {{end}}
+
+        {{with .S.Stops}}
+        <details class="card small">
+            <summary>Остановы с привязкой к замене штампа: {{len .}}</summary>
+            {{range .}}<div>{{.}}</div>{{end}}
+        </details>
+        {{end}}
+        {{end}}
+    </main>
+</body>
+
+</html>

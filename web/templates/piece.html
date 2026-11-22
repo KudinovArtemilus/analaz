@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>press-go · заготовка{{with .N}} {{.}}{{end}}{{with .H}} · плавка {{.}}{{end}}</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script src="/static/app.js" defer></script>
+</head>
+
+<body>
+    <header class="top">
+        <span class="brand">press-go</span>
+        <nav class="nav"><a href="/">Циклы</a><a href="/analysis">Анализ</a><a href="/piece" class="on">Заготовка</a><a
+                href="/admin">Настройки</a></nav>
+    </header>
+
+    <main class="page">
+        <!-- И3: паспорт заготовки. Номер — из имени файла цикла (26.169197.067563_OP1_…): это заготовка, которая в прессе. -->
+        <form class="piece-search" method="get" action="/piece">
+            <label>Заготовка № <input type="text" name="n" value="{{.N}}" inputmode="numeric" placeholder="169197"
+                    autofocus></label>
+            <label>или плавка № <input type="text" name="h" value="{{.H}}" inputmode="numeric"
+                    placeholder="67563"></label>
+            <button type="submit">Найти</button>
+            <span class="muted small">номер — из имени файла цикла: 26.<b>169197</b>.<b>067563</b>_OP1_…</span>
+        </form>
+
+        {{if not .Enabled}}
+        <div class="empty">
+            <div class="muted">Анализ не включён — укажите папку таблиц признаков в <a href="/admin">Настройках</a>.
+            </div>
+        </div>
+        {{else if .Error}}
+        <div class="error">{{.Error}}</div>
+        {{end}}
+
+        {{with .Pieces}}
+        <h2 class="piece-h">Заготовка {{$.N}}{{if ge $.Heat 0}} · <a href="/piece?h={{$.Heat}}">плавка
+                {{$.Heat}}</a>{{end}}</h2>
+        <div class="piece-ops">
+            {{range .}}
+            <section class="card">
+                <h3>{{.Op}}</h3>
+                {{with .Err}}<div class="error small">{{.}}</div>{{end}}
+                {{range .Cycles}}
+                <div class="piece-cycle">
+                    <div><b>{{.Time}}</b> {{with .Open}}<a href="{{.}}" target="_blank">открыть цикл</a>{{end}} <span
+                            class="muted small">{{.File}}</span></div>
+                    {{if not .Production}}
+                    <div class="note small">Нерабочий цикл (усилие ниже порога): с нормой не сравнивается.</div>
+                    {{else}}
+                    {{if .Anomalous}}
+                    <div class="st-warn small piece-verdict"><b>Аномальный цикл</b> — сильно отличался от соседних
+                        циклов:
+                        {{range $i, $r := .Reasons}}{{if $i}}; {{end}}{{$r.Name}} {{v $r.Value}} (обычно {{v $r.Rm}},
+                        {{z $r.Z}}){{end}}</div>
+                    {{else}}
+                    <div class="small piece-verdict muted">Не аномальный: от соседних циклов не отличался.</div>
+                    {{end}}
+                    {{with .Run}}<div class="st-warn small piece-verdict">Цикл попал в отрезок работы вне нормы: {{.}}
+                    </div>{{end}}
+                    <table class="tbl small">
+                        <tr>
+                            <th>показатель</th>
+                            <th>этот цикл</th>
+                            <th>норма</th>
+                            <th>z</th>
+                        </tr>
+                        {{range .Key}}<tr class="{{zcls .Z 2.0 4.0}}">
+                            <td>{{.Name}}</td>
+                            <td>{{v .Value}}</td>
+                            <td>{{v .Norm}}</td>
+                            <td>{{z .Z}}</td>
+                        </tr>{{end}}
+                    </table>
+                    <div class="muted small">сверху — сильнее всего отличающиеся от нормы; выделено: янтарным — больше
+                        2σ, красным — больше 4σ</div>
+                    {{end}}
+                </div>
+                {{else}}
+                <div class="muted small">На {{.Op}} цикла этой заготовки в таблице признаков нет{{if $.H}}{{else}}
+                    (таблица может быть выборкой — каждый N-й цикл){{end}}.</div>
+                {{end}}
+            </section>
+            {{end}}
+        </div>
+        {{end}}
+
+        {{with .HeatRows}}
+        <section class="card">
+            <h3>Плавка {{$.H}}: заготовок {{len .}}</h3>
+            <p class="muted small">Отметка — на какой операции был цикл заготовки: <span
+                    class="st-warn">аномальный</span> или в отрезке работы вне нормы. Щелчок по номеру — паспорт
+                заготовки.</p>
+            <table class="tbl small">
+                <tr>
+                    <th>заготовка</th>
+                    <th>время</th>{{range (index . 0).Marks}}<th>{{.Op}}</th>{{end}}
+                </tr>
+                {{range .}}<tr{{if .AnyBad}} class="st-warn" {{end}}>
+                    <td><a href="/piece?n={{.Piece}}">{{.Piece}}</a></td>
+                    <td class="nowrap">{{.Time}}</td>
+                    {{range .Marks}}<td>{{if not .Seen}}<span class="muted">—</span>{{else if .Anomalous}}аномальный{{if
+                        .InRun}}, отрезок вне нормы{{end}}{{else if .InRun}}отрезок вне нормы{{else}}<span
+                            class="muted">в норме</span>{{end}}</td>{{end}}</tr>{{end}}
+            </table>
+        </section>
+        {{else}}{{if $.H}}{{if not .Error}}<div class="muted">Заготовок плавки {{$.H}} в таблицах нет.</div>
+        {{end}}{{end}}
+        {{end}}
+    </main>
+</body>
+
+</html>
