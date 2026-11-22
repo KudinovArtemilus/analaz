@@ -58,10 +58,8 @@ func buildDescs() map[string]Desc {
 			d[p+"_press_max"] = Desc{s, fmt.Sprintf("Насос %d.%d: макс. давление, бар", a, b), ""}
 		}
 	}
-	for _, s := range []string{
-		"v12Y102", "v12Y069_21", "v12Y069_22", "v20Y019", "v31Y102", "vCCylL_Y22_2", "vCCylR_Y22_1",
-		"vLCylL_Y21_2", "vLCylR_Y21_1", "vMB_Y1", "vMB_Y2",
-	} {
+	for _, s := range []string{"v12Y102", "v12Y069_21", "v12Y069_22", "v20Y019", "v31Y102", "vCCylL_Y22_2", "vCCylR_Y22_1",
+		"vLCylL_Y21_2", "vLCylR_Y21_1", "vMB_Y1", "vMB_Y2"} {
 		nm := s[1:]
 		d[s+"_err_rms"] = Desc{"Сервоклапаны", "Клапан " + nm + ": ошибка задание-золотник (RMS)", "загрязнение/износ золотника"}
 		d[s+"_err_absmax"] = Desc{"Сервоклапаны", "Клапан " + nm + ": макс. ошибка", "заедание"}
@@ -120,6 +118,9 @@ func Subsystem(col string) string {
 	if d, ok := Descs[col]; ok {
 		return d.Subsystem
 	}
+	if d, ok := kpsStepDesc(col); ok {
+		return d.Subsystem
+	}
 	switch {
 	case strings.HasPrefix(col, "a"):
 		return "Сырые аналоговые"
@@ -132,6 +133,9 @@ func Subsystem(col string) string {
 // Human — понятное название признака (human() в Python): из словаря или из имени канала.
 func Human(col string) string {
 	if d, ok := Descs[col]; ok {
+		return d.Text
+	}
+	if d, ok := kpsStepDesc(col); ok {
 		return d.Text
 	}
 	if m := reHumanRaw.FindStringSubmatch(col); m != nil {

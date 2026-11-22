@@ -373,3 +373,32 @@ func KpsSources(feature string) []string {
 	}
 	return nil
 }
+
+// Доступ к спискам КПС для анализа (узлы, группы, подписи) — из тех же списков, по которым
+// считаются признаки, чтобы имена не разъехались.
+
+// Key — ключ оси (mrf, wrf_l…).
+func (a kpsAxis) Key() string { return a.key }
+
+// ValveKeys — ключи клапанов оси (y1_1, y11_2…).
+func (a kpsAxis) ValveKeys() []string { return valveKeys(a.valves) }
+
+// HasForce — у оси есть датчик усилия.
+func (a kpsAxis) HasForce() bool { return a.force != "" }
+
+// Key — ключ привода (mrd, wrd_l…).
+func (d kpsDrive) Key() string { return d.key }
+
+// ValveKeys — ключи клапанов привода.
+func (d kpsDrive) ValveKeys() []string { return valveKeys(d.valves) }
+
+// Key — ключ насоса (p1_1…).
+func (p kpsPump) Key() string { return p.key }
+
+func valveKeys(vs []kpsValve) []string {
+	out := make([]string, len(vs))
+	for i, v := range vs {
+		out[i] = v.key
+	}
+	return out
+}

@@ -217,6 +217,30 @@ func Evaluate(P *Dataset, normMed func(string) float64, sig map[string]float64, 
 			}
 		}
 
+		// напарник (КПС): левая ось против правой, P1.1 против P1.2. Одинаковых узлов по двое,
+		// поэтому не «против группы», как у пресса, а против второго из пары. Отличие было и в
+		// норме — это особенность стороны или датчика (проверить один раз), а не износ.
+		if u.PairFeat != "" && P.Col(u.PairFeat) != nil && P.Col(u.PairOther) != nil {
+			v, o := NanMedian(T.Col(u.PairFeat)), NanMedian(T.Col(u.PairOther))
+			bv, bo := normMed(u.PairFeat), normMed(u.PairOther)
+			if finite(v) && finite(o) && o > 0 && v/o > PairRatioWarn {
+				ratio := v / o
+				always := finite(bv) && finite(bo) && bo > 0 && bv/bo > PairRatioWarn
+				st := Warn
+				if ratio > PairRatioAlarm && !always {
+					st = Alarm
+				}
+				txt := fmt.Sprintf("хуже напарника (%s) в %.1f раза: %s против %s", u.PairName, ratio, fmtv(v, ""), fmtv(o, ""))
+				if always {
+					txt += fmt.Sprintf("; и в норме было так же (в %.1f раза) — скорее особенность этой стороны или датчика: проверить один раз", bv/bo)
+				} else if finite(bv) && finite(bo) && bo > 0 {
+					txt += fmt.Sprintf("; в норме было в %.1f раза — отличие появилось недавно", bv/bo)
+				}
+				status = max(status, st)
+				facts = append(facts, fact{st, txt})
+			}
+		}
+
 		// выбросы (сервоклапаны)
 		if x := P.Col(u.SpikeFeat); u.SpikeFeat != "" && x != nil && notna(x) > 5 {
 			med := NanMedian(x)
@@ -387,7 +411,11 @@ func StopsSummary(all *Dataset, gapThrMin float64) []string {
 
 // DiagnosisText — diagnosis.txt (to_text в diagnose.py).
 func DiagnosisText(diag []Diag, op, period string, n int, stops []string, short bool, notes []string) string {
-	L := []string{fmt.Sprintf("ДИАГНОЗ ПРЕССА %s — %s, циклов: %d", op, period, n), ""}
+	machine := "ПРЕССА" // как в diagnose.py — у пресса текст совпадает с Python побайтно
+	if len(diag) > 0 && strings.HasPrefix(diag[0].Group, "КПС") {
+		machine = "КПС"
+	}
+	L := []string{fmt.Sprintf("ДИАГНОЗ %s %s — %s, циклов: %d", machine, op, period, n), ""}
 	if short {
 		L = append(L, "ВНИМАНИЕ: данных меньше недели — прогнозы и тренды предварительные; сравнение «насос с насосом» надёжно.", "")
 	}

@@ -11,8 +11,11 @@ import (
 // Здесь — правила, которые легко сломать при правке.
 
 func TestGroupsList(t *testing.T) {
-	if len(Groups) != 18 {
-		t.Errorf("групп %d, в charts.py 18", len(Groups))
+	if len(pressGroups) != 18 {
+		t.Errorf("групп пресса %d, в charts.py 18", len(pressGroups))
+	}
+	if !slices.Equal(titles(Groups[:18]), titles(pressGroups)) || len(Groups) != 18+len(kpsGroups()) {
+		t.Errorf("сначала группы пресса как в charts.py, потом КПС: всего %d", len(Groups))
 	}
 	if g := Groups[0].Feats; len(g) != 6 || g[0] != "casedrain_md1_mean" || g[5] != "casedrain_md6_mean" {
 		t.Errorf("дренажи: %v", g)
@@ -31,6 +34,14 @@ func TestGroupsList(t *testing.T) {
 			}
 		}
 	}
+}
+
+func titles(gs []Group) []string {
+	var out []string
+	for _, g := range gs {
+		out = append(out, g.Title)
+	}
+	return out
 }
 
 func TestGroupDataSkipsEmpty(t *testing.T) {

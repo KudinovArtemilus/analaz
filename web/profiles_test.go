@@ -84,13 +84,16 @@ func TestTwoProfiles(t *testing.T) {
 
 	// --- анализ: вкладка OP3, название машины, пометка про узлы ---
 	body := do(h, "GET", "/analysis?op=OP3", nil, false, nil).Body.String()
-	for _, want := range []string{`href="/analysis?op=OP1"`, `href="/analysis?op=OP3"`, "КПС OP3", "Узлы этой машины ещё не описаны"} {
+	for _, want := range []string{`href="/analysis?op=OP1"`, `href="/analysis?op=OP3"`, "КПС OP3", "Норма пока общая для всех колёс"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("анализ OP3: нет %q", want)
 		}
 	}
-	if b := do(h, "GET", "/analysis?op=OP1", nil, false, nil).Body.String(); strings.Contains(b, "Узлы этой машины ещё не описаны") {
-		t.Error("у пресса пометка про неописанные узлы")
+	if b := do(h, "GET", "/analysis?op=OP1", nil, false, nil).Body.String(); strings.Contains(b, "Узлы этой машины ещё не описаны") || strings.Contains(b, "Норма пока общая") {
+		t.Error("у пресса пометки КПС")
+	}
+	if strings.Contains(body, "Узлы этой машины ещё не описаны") {
+		t.Error("у КПС узлы теперь есть — пометка «не описаны» лишняя")
 	}
 
 	// --- циклы: обе папки в списке, цикл КПС открывается по адресу @kps/… ---

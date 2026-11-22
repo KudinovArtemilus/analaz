@@ -94,7 +94,8 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 	if s.cfg != nil {
 		if p := s.cfg.Get().ProfileFor(op); p != nil {
 			data["Machine"] = p.Name
-			data["NoUnits"] = p.Kind != "" && p.Kind != "press10"
+			data["NoUnits"] = p.Kind != "" && p.Kind != "press10" && p.Kind != "kps"
+			data["CommonNorm"] = p.Kind == "kps" // узлы есть, но норма пока общая для всех колёс (до К4)
 		}
 	}
 	if op == "" {
