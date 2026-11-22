@@ -45,7 +45,7 @@ func TestSourcesCoverAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	// служебные признаки: из имени файла, структуры файла и сырые дискретные
-	service := regexp.MustCompile(`^(n_samples|cycle_s|dt_ms|fn_.*|shp_.*|d\d{3}_.*)$`)
+	service := regexp.MustCompile(`^(n_samples|cycle_s|dt_ms|feat_ver|fn_.*|shp_.*|d\d{3}_.*)$`)
 	n := 0
 	for ft := range Compute(f) {
 		if service.MatchString(ft) {
