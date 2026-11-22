@@ -306,7 +306,65 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 		dies = append(dies, v)
 	}
 	data["Dies"], data["DieKey"], data["MainRecipe"] = dies, dieKeyNames(s), main.String()
+
+	// К4б: журнал изменений — по всем циклам операции, новые сверху. У колеса res — только его
+	// циклы, а смена колеса видна лишь по всем вместе: берём общий результат операции
+	jr := res
+	if regime != "" && regime != "all" {
+		if m, err := s.an.get(base); err == nil {
+			jr = m
+		}
+	}
+	data["Journal"], data["JournalMore"], data["JournalTail"] = s.journalViews(jr, wallNow())
 	s.render(w, "analysis.html", data)
+}
+
+// journalMax — столько событий журнала на странице; остальное — «и ещё N».
+const journalMax = 100
+
+// journalView — строка журнала изменений.
+type journalView struct {
+	At, Kind, KindName, Text, Open string
+}
+
+var journalKinds = map[string]string{
+	"wheel": "колесо", "roll": "валок", "recipe": "рецепт", "setpoint": "задание",
+	"step": "запись", "gap": "пауза", "die": "штамп",
+}
+
+// journalViews — журнал для страницы и «хвост»: если последний цикл старше паузы журнала,
+// отдельной строкой «нет новых циклов с …» — иначе молчание регистратора не видно.
+func (s *Server) journalViews(res *analyze.Result, now time.Time) (out []journalView, more int, tail string) {
+	ev := res.Journal()
+	if d := res.All; d != nil && d.Len() > 0 {
+		last := d.Times[d.Len()-1]
+		for _, t := range d.Times {
+			if t.After(last) {
+				last = t
+			}
+		}
+		if ago := now.Sub(last); ago > analyze.JournalGap {
+			tail = "Нет новых циклов с " + last.Format("02.01 15:04") + " (" + analyze.DurText(ago) + " назад)"
+		}
+	}
+	if len(ev) > journalMax {
+		ev, more = ev[:journalMax], len(ev)-journalMax
+	}
+	for _, e := range ev {
+		v := journalView{At: e.At.Format("02.01 15:04"), Kind: e.Kind, KindName: journalKinds[e.Kind], Text: e.Text}
+		if e.File != "" {
+			v.Open = s.relData(e.File)
+		}
+		out = append(out, v)
+	}
+	return out, more, tail
+}
+
+// wallNow — «сейчас» по настенным часам: время циклов в таблице — местное без пояса (как в имени
+// файла), поэтому и «сейчас» берём так же, иначе «N назад» съедет на разницу с UTC.
+func wallNow() time.Time {
+	n := time.Now()
+	return time.Date(n.Year(), n.Month(), n.Day(), n.Hour(), n.Minute(), n.Second(), 0, time.UTC)
 }
 
 // dieKey — показатели, по которым видно, что штампы разные (геометрия и нагрузка).

@@ -566,6 +566,11 @@ a[hx-get]:hover {
     vertical-align: top;
 }
 
+.scroll-y {
+    max-height: 420px;
+    overflow-y: auto;
+}
+
 .nowrap {
     white-space: nowrap;
 }

@@ -208,6 +208,10 @@ func TestAnalysisPages(t *testing.T) {
 			t.Errorf("страница анализа: нет %q", want)
 		}
 	}
+	// К4б: регистратор молчит с 04.11 22:48 — журнал говорит об этом первой строкой
+	if !strings.Contains(b, "Журнал изменений") || !strings.Contains(b, "Нет новых циклов с 04.11 22:48") {
+		t.Errorf("журнал изменений: нет карточки или «хвоста»")
+	}
 	if b := body("/analysis/day?op=OP1&d=2026-11-02"); !strings.Contains(b, "циклов") || strings.Contains(b, "шаблон") {
 		t.Errorf("сутки: %.300s", b)
 	}
@@ -278,5 +282,24 @@ func TestHistogram(t *testing.T) {
 	}
 	if one := histogram([]float64{5, 5}, []float64{5}, 30); len(one.Base) != 1 || one.Base[0] != 1 {
 		t.Errorf("все одинаковые — один столбик: %+v", one)
+	}
+}
+
+// TestJournalViews — «хвост» журнала: есть, только когда последний цикл старше паузы журнала.
+func TestJournalViews(t *testing.T) {
+	dir := t.TempDir()
+	writeTable(t, dir)
+	s, _ := New(t.TempDir(), time.UTC)
+	s.EnableAnalysis(dir, dir)
+	res, err := s.an.get("OP1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := time.Date(2026, 11, 4, 22, 48, 0, 0, time.UTC)
+	if _, _, tail := s.journalViews(res, last.Add(time.Hour)); tail != "" {
+		t.Errorf("через час после цикла — не пауза, а «%s»", tail)
+	}
+	if _, _, tail := s.journalViews(res, last.Add(26*time.Hour+10*time.Minute)); tail != "Нет новых циклов с 04.11 22:48 (26 ч 10 мин назад)" {
+		t.Errorf("хвост: «%s»", tail)
 	}
 }

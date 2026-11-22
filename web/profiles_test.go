@@ -16,6 +16,7 @@ import (
 	"github.com/KudinovArtemilus/press-go/internal/batch"
 	"github.com/KudinovArtemilus/press-go/internal/config"
 	"github.com/KudinovArtemilus/press-go/internal/extract"
+	"github.com/KudinovArtemilus/press-go/internal/features"
 	"github.com/KudinovArtemilus/press-go/internal/shp"
 )
 
@@ -341,8 +342,8 @@ func TestFeaturesRecomputeOldVersion(t *testing.T) {
 		t.Fatalf("второй проход: %+v", op3)
 	}
 	tb, _ := batch.ReadCSVGz(target)
-	if tb.Len() != 6 || len(tb.Stale(1)) != 0 {
-		t.Fatalf("после пересчёта: строк %d, старых %d", tb.Len(), len(tb.Stale(1)))
+	if tb.Len() != 6 || len(tb.Stale(features.KpsVersion)) != 0 {
+		t.Fatalf("после пересчёта: строк %d, старых %d", tb.Len(), len(tb.Stale(features.KpsVersion)))
 	}
 	if j := slices.Index(tb.Columns(), "kps_mrf_force_max"); j < 0 || math.IsNaN(tb.Column(j)[0]) {
 		t.Fatal("нет признаков КПС после пересчёта")
@@ -395,6 +396,11 @@ func TestKpsWheelNorms(t *testing.T) {
 			i := strings.Index(b, "an-title")
 			t.Errorf("страница OP3: нет %q\n%s", want, b[max(0, i):min(len(b), i+700)])
 		}
+	}
+	// К4б: на странице колеса журнал всё равно по всем циклам — смена колеса в нём видна
+	if !strings.Contains(b, "Журнал изменений") || !strings.Contains(b, "Колесо: DV 860 / DW 895 → DV 1164 / DW 1253") {
+		i := strings.Index(b, "an-journal")
+		t.Errorf("журнал на странице колеса: нет смены колеса\n%s", b[max(0, i):min(len(b), i+1500)])
 	}
 	// колесо 860: циклов ≥ порога — норма сохраняется сама (в фоне, страницу колеса никто не открывал)
 	np := filepath.Join(feat, "norm_OP3@dv860-dw895.json")

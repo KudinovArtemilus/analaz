@@ -199,6 +199,7 @@ func Kps(f *shp.File, dt float64, out Features) {
 			}
 			out[k+"_swivel_lag_ms"] = LagSamples(sp, ap, maxLag) * dt * 1000
 			out[k+"_swivel_set_max"] = NanMax(sp)
+			out[k+"_swivel_set_min"] = NanMin(sp) // «нижнее» задание: у P2.1 менялось 50 → 59, а максимум почти нет
 		}
 		if x := ana(p.press); x != nil {
 			out[k+"_press_max"] = NanMax(x)
@@ -326,7 +327,7 @@ var kpsSourceMap = sync.OnceValue(func() map[string][]string {
 	}
 	for _, p := range KpsPumps {
 		k := "kps_" + p.key
-		for _, s := range []string{"_swivel_err_rms", "_swivel_err_active", "_swivel_lag_ms", "_swivel_set_max"} {
+		for _, s := range []string{"_swivel_err_rms", "_swivel_err_active", "_swivel_lag_ms", "_swivel_set_max", "_swivel_set_min"} {
 			add(k+s, p.set, p.act)
 		}
 		add(k+"_press_max", p.press)

@@ -186,6 +186,7 @@ func kpsDescs() map[string]Desc {
 		add(k+"_swivel_err_active", sub, sub+": ошибка угла под нагрузкой", "износ/загрязнение регулятора")
 		add(k+"_swivel_lag_ms", sub, sub+": запаздывание угла, мс", "регулятор медленнее")
 		add(k+"_swivel_set_max", sub, sub+": задание угла, макс.", "смена настройки")
+		add(k+"_swivel_set_min", sub, sub+": задание угла, мин.", "смена настройки")
 		add(k+"_press_max", sub, sub+": давление, макс., бар", "")
 		add(k+"_press_min", sub, sub+": давление, мин., бар", "")
 		add(k+"_valve_err_rms", sub, sub+": ошибка клапана регулятора", "загрязнение/износ клапана регулятора")

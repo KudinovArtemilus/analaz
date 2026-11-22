@@ -133,6 +133,39 @@
             <div id="hm-cell"></div>
         </section>
 
+        <!-- К4б: журнал изменений (journal.go) -->
+        {{if or .Journal .JournalTail}}
+        <section class="card" id="an-journal">
+            <h3>Журнал изменений</h3>
+            <p class="muted small">Что менялось в работе машины, одной лентой, новые сверху: смена колеса и рецепта,
+                замена валков и штампа, задания, шаг записи регистратора, паузы. Изменение засчитано, только если новое
+                значение держится несколько циклов подряд — одиночный выброс сюда не попадает (он в аномалиях).
+                Отклонение в анализе стоит сначала сверить с этим журналом: часто причина — не износ, а то, что что-то
+                поменяли.</p>
+            {{with .JournalTail}}<p class="st-warn pad"><b>{{.}}</b></p>{{end}}
+            {{with .Journal}}
+            <div class="scroll-y">
+                <table class="tbl small">
+                    <tr>
+                        <th>когда</th>
+                        <th>что</th>
+                        <th>событие</th>
+                        <th></th>
+                    </tr>
+                    {{range .}}<tr>
+                        <td class="nowrap">{{.At}}</td>
+                        <td><span class="tag">{{.KindName}}</span></td>
+                        <td>{{.Text}}</td>
+                        <td class="nowrap">{{with .Open}}<a href="/?open={{.}}" target="_blank">открыть цикл</a>{{end}}
+                        </td>
+                    </tr>{{end}}
+                </table>
+            </div>
+            {{end}}
+            {{with .JournalMore}}<p class="muted small">и ещё {{.}} событий раньше</p>{{end}}
+        </section>
+        {{end}}
+
         <!-- И1: установки штампа (dies.go) -->
         {{with .Dies}}
         <section class="card">
