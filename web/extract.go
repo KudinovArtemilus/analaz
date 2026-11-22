@@ -186,7 +186,7 @@ func (fr *featRunner) Run() bool {
 	st.Ops = make([]featOpStatus, 0, n) // ёмкость сразу на все: указатели на элементы не «переедут»
 	var jobs []*featJob
 	for i, p := range profiles {
-		roots := p.Sources
+		roots := c.Dirs(p) // у кольцевого буфера — папка с копиями, не само кольцо
 		if len(roots) == 0 && i == 0 {
 			roots = []string{fr.s.data} // папка из -data при запуске относится к первому профилю
 		}

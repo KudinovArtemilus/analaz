@@ -270,3 +270,16 @@ func fileTime(ft uint64) time.Time {
 	unix100ns := int64(ft) - ticks1601to1970
 	return time.Unix(0, unix100ns*100).UTC()
 }
+
+// HeaderTime — время начала записи из заголовка (UTC), без разбора остального файла.
+// Нужно, когда в имени файла времени нет (кольцевой буфер регистратора: actual.shp, old01.shp…).
+func HeaderTime(d []byte) (time.Time, error) {
+	if len(d) < offFileTime+8 {
+		return time.Time{}, ErrTooShort
+	}
+	t := fileTime(binary.LittleEndian.Uint64(d[offFileTime:]))
+	if t.IsZero() {
+		return t, errors.New("shp: в заголовке нет времени")
+	}
+	return t, nil
+}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/KudinovArtemilus/press-go/internal/analyze"
 	"github.com/KudinovArtemilus/press-go/internal/config"
+	"github.com/KudinovArtemilus/press-go/internal/ring"
 	"github.com/KudinovArtemilus/press-go/internal/shp"
 )
 
@@ -34,6 +35,7 @@ func (s *Server) UseConfig(st *config.Store) {
 	s.cfg = st
 	s.arch = newArchiveRunner(s)
 	s.feat = newFeatRunner(s)
+	s.ring = newRingRunner(s)
 	s.an = &analysisStore{cache: map[string]*analysisEntry{}, dirs: func() (string, string) {
 		c := st.Get()
 		return c.FeaturesDir, c.NormsDir
@@ -140,7 +142,20 @@ func inlineError(w http.ResponseWriter, err error) {
 
 func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 	c := s.cfg.Get()
-	s.render(w, "admin.html", map[string]any{"C": c, "Path": s.cfg.Path(), "Saved": r.URL.Query().Get("saved"), "Arch": s.arch.Status(), "Feat": s.feat.Status()})
+	rings := map[string]*ringStatus{}
+	for _, p := range c.Profiles {
+		if st := s.ring.Status(p.ID); st != nil {
+			rings[p.ID] = st
+		}
+	}
+	s.render(w, "admin.html", map[string]any{"C": c, "Path": s.cfg.Path(), "Saved": r.URL.Query().Get("saved"), "Arch": s.arch.Status(), "Feat": s.feat.Status(),
+		"Ring": rings})
+}
+
+// latinOp — операции в верхнем регистре и латиницей: «ор4» и «ОП4», набранные в русской
+// раскладке, становятся OP4 (в именах файлов регистратора операция всегда латиницей).
+func latinOp(s string) string {
+	return strings.NewReplacer("О", "O", "Р", "P", "П", "P").Replace(strings.ToUpper(s))
 }
 
 // adminSaveProfile — сохранить профиль из формы (или добавить новый, если id ещё нет).
@@ -163,11 +178,12 @@ func (s *Server) adminSaveProfile(w http.ResponseWriter, r *http.Request) {
 		p.Kind = strings.TrimSpace(f.Get("kind"))
 		p.Sources = lines(f.Get("sources"))
 		p.Ops = nil
-		for _, op := range strings.FieldsFunc(strings.ToUpper(f.Get("ops")), func(r rune) bool { return r == ',' || r == ' ' || r == ';' }) {
+		for _, op := range strings.FieldsFunc(latinOp(f.Get("ops")), func(r rune) bool { return r == ',' || r == ' ' || r == ';' }) {
 			p.Ops = append(p.Ops, op)
 		}
 		p.TZ = tz
 		p.Enabled = f.Get("enabled") == "on"
+		p.Ring = f.Get("ring") == "on"
 		return nil
 	})
 	if err != nil {
@@ -190,7 +206,15 @@ func (s *Server) adminSaveArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.cfg.Update(func(c *config.Config) error {
-		c.Archive = config.Archive{KeepDays: days, KeepEvery: every, MaxGB: gb}
+		ringDays := c.Archive.RingDays
+		if v := strings.TrimSpace(f.Get("ring_days")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				return fmt.Errorf("копии кольцевого буфера: дней — целое ≥ 1, получили %q", v)
+			}
+			ringDays = n
+		}
+		c.Archive = config.Archive{KeepDays: days, KeepEvery: every, MaxGB: gb, RingDays: ringDays}
 		c.FeaturesDir = strings.TrimSpace(f.Get("features_dir"))
 		c.DataDir = strings.TrimSpace(f.Get("data_dir"))
 		return nil
@@ -209,6 +233,7 @@ type sourceCheck struct {
 	Error  string
 	Files  int  // сколько .shp нашлось (не больше лимита)
 	More   bool // нашлось больше лимита — дальше не считали
+	Ring   int  // из них без времени в имени (old01.shp…) — похоже на кольцевой буфер
 	Newest string
 	Took   string
 }
@@ -225,7 +250,7 @@ func (s *Server) adminCheck(w http.ResponseWriter, r *http.Request) {
 	for _, src := range p.Sources {
 		out = append(out, checkSource(r.Context(), src))
 	}
-	s.render(w, "admin_check.html", map[string]any{"Checks": out})
+	s.render(w, "admin_check.html", map[string]any{"Checks": out, "Ring": p.Ring})
 }
 
 const checkLimit = 20000
@@ -256,6 +281,9 @@ func checkSource(ctx context.Context, dir string) sourceCheck {
 		}
 		if !d.IsDir() && strings.EqualFold(filepath.Ext(p), ".shp") {
 			c.Files++
+			if ring.IsRingName(d.Name()) {
+				c.Ring++
+			}
 			if info, err := d.Info(); err == nil && info.ModTime().After(newest) {
 				newest = info.ModTime()
 				c.Newest = filepath.Base(p) + " · " + info.ModTime().Format("02.01.2006 15:04")
@@ -290,7 +318,7 @@ func (s *Server) adminAliases(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	var rows []aliasRow
 	note := ""
-	if f, path, err := newestShp(p.Sources, p.Ops); err == nil {
+	if f, path, err := newestShp(c.Dirs(p), p.Ops); err == nil { // у кольца — по копиям: в самом кольце операции в имени нет
 		note = "каналы из файла " + filepath.Base(path)
 		for _, name := range f.AnaNames {
 			if spare.MatchString(name) {

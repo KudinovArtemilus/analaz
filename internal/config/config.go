@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/KudinovArtemilus/press-go/internal/features"
 )
@@ -30,6 +32,21 @@ type Archive struct {
 	KeepDays  int     `json:"keep_days"`  // все циклы храним столько дней
 	KeepEvery int     `json:"keep_every"` // дальше — каждый N-й обычный цикл (плюс важные: повреждённые, перед остановами, тревоги)
 	MaxGB     float64 `json:"max_gb"`     // потолок архива на диске
+	RingDays  int     `json:"ring_days"`  // копии кольцевого буфера храним столько дней (0 — RingDaysDefault)
+}
+
+// RingDaysDefault — сколько дней держать копии кольца, если не задано. Цикл пресса 5 — ~1,5 мин,
+// ~700 КБ в сжатом архиве и ~2,5 МБ в копии: сутки ≈ 2,4 ГБ. Двух суток хватает, чтобы архив
+// успел отобрать нужное (аномалии, каждый N-й) в постоянное хранение.
+const RingDaysDefault = 2
+
+// RingKeep — сколько держать копии кольца.
+func (a Archive) RingKeep() time.Duration {
+	d := a.RingDays
+	if d <= 0 {
+		d = RingDaysDefault
+	}
+	return time.Duration(d) * 24 * time.Hour
 }
 
 // Profile — одна машина: пресс 10, пресс 5, КПС…
@@ -41,6 +58,7 @@ type Profile struct {
 	Ops     []string          `json:"ops"`     // операции в именах файлов: OP1, OP2
 	TZ      int               `json:"tz"`      // часовой пояс времени в имени файла, часы от UTC
 	Enabled bool              `json:"enabled"`
+	Ring    bool              `json:"ring"`    // папки — кольцевой буфер (actual.shp, old01.shp…): циклы копируются к себе, см. internal/ring
 	Aliases map[string]string `json:"aliases"` // своё название: исходное имя канала или признака → как показывать
 }
 
@@ -79,8 +97,15 @@ func (c *Config) Validate() error {
 		}
 		for _, op := range p.Ops {
 			if !reOp.MatchString(op) {
-				return fmt.Errorf("профиль %q: операция %q — ждали OP1, OP2…", p.ID, op)
+				return fmt.Errorf("профиль %q: операция %q — ждали OP1, OP2… (латиницей)", p.ID, op)
 			}
+		}
+		// в имени кольца операции нет — её берём из профиля, поэтому она должна быть ровно одна
+		if p.Ring && len(p.Ops) != 1 {
+			return fmt.Errorf("профиль %q: кольцевой буфер — нужна ровно одна операция (в именах old01.shp её нет), а их %d", p.ID, len(p.Ops))
+		}
+		if p.Ring && p.Enabled && strings.TrimSpace(c.DataDir) == "" {
+			return fmt.Errorf("профиль %q: кольцевой буфер копируется в папку данных службы — задайте её в «Хранение»", p.ID)
 		}
 	}
 	// Таблицы признаков называются по операции (features_OP3.csv.gz) и лежат в одной папке:
@@ -293,5 +318,28 @@ func (p *Profile) SortedAliases() [][2]string {
 		out = append(out, [2]string{k, v})
 	}
 	slices.SortFunc(out, func(a, b [2]string) int { return strings.Compare(a[0], b[0]) })
+	return out
+}
+
+// RingDir — куда копируются циклы i-й папки кольцевого профиля: <папка данных>\ring\<id>
+// (для второй и дальше папок — <id>.2, <id>.3…).
+func (c *Config) RingDir(p *Profile, i int) string {
+	name := p.ID
+	if i > 0 {
+		name += "." + strconv.Itoa(i+1)
+	}
+	return filepath.Join(c.DataDir, "ring", name)
+}
+
+// Dirs — папки, из которых профиль берёт циклы: сами папки-источники, а у кольца — копии
+// (имена в кольце сдвигаются каждые полторы минуты, читать по ним нельзя).
+func (c *Config) Dirs(p *Profile) []string {
+	if !p.Ring {
+		return p.Sources
+	}
+	out := make([]string, len(p.Sources))
+	for i := range p.Sources {
+		out[i] = c.RingDir(p, i)
+	}
 	return out
 }

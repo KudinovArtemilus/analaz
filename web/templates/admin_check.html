@@ -1,10 +1,9 @@
-{{range .Checks}}
-<div class="small {{if .OK}}{{else}}st-alarm{{end}} check">
-    <b>{{.Path}}</b> — {{if .OK}}доступна, .shp: {{.Files}}{{if .More}}+ (дальше
-    не считали){{end}}{{with .Newest}}, самый свежий:
+{{range .Checks}}<div class="small {{if .OK}}{{else}}st-alarm{{end}} check">
+    <b>{{.Path}}</b> —
+    {{if .OK}}доступна, .shp: {{.Files}}{{if .More}}+ (дальше не считали){{end}}{{with .Newest}}, самый свежий:
     {{.}}{{end}}{{else}}{{.Error}}{{end}}
     <span class="muted">({{.Took}})</span>
-</div>
-{{else}}
-<div class="small st-warn check">В профиле не указано ни одной папки</div>
-{{end}}
+    {{if and .Ring (not $.Ring)}}<div class="st-warn">Файлов без времени в имени — {{.Ring}} (actual.shp, old01.shp…):
+        похоже на <b>кольцевой буфер</b>. Включите у профиля галочку «кольцевой буфер», иначе циклы не посчитаются.
+    </div>{{end}}
+</div>{{else}}<div class="small st-warn check">В профиле не указано ни одной папки</div>{{end}}

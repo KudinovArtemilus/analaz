@@ -85,13 +85,21 @@ func TestAdminSaveProfile(t *testing.T) {
 	}
 
 	// ошибка в форме — страница с ошибкой, настройки не меняются
-	bad := url.Values{"id": {"press10"}, "name": {"Пресс 10"}, "ops": {"ОП1"}, "tz": {"5"}}
+	bad := url.Values{"id": {"press10"}, "name": {"Пресс 10"}, "ops": {"PRESS1"}, "tz": {"5"}}
 	rec = do(h, "POST", "/admin/profile", bad, true, nil)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Не сохранено") {
 		t.Errorf("плохая форма: код %d", rec.Code)
 	}
 	if len(st.Get().Profile("press10").Sources) != 2 {
 		t.Error("плохая форма изменила настройки")
+	}
+	// операция в русской раскладке («ОР4» — кириллические О и Р) сохраняется латиницей
+	rus := url.Values{"id": {"press5"}, "name": {"Пресс 5"}, "kind": {"press5"}, "ops": {"ОР4"}, "tz": {"5"}, "ring": {"on"}}
+	if rec := do(h, "POST", "/admin/profile", rus, true, nil); rec.Code != http.StatusSeeOther {
+		t.Fatalf("ОР4: код %d\n%s", rec.Code, rec.Body.String())
+	}
+	if p := st.Get().Profile("press5"); p == nil || len(p.Ops) != 1 || p.Ops[0] != "OP4" || !p.Ring {
+		t.Errorf("ОР4 → %+v", p)
 	}
 }
 

@@ -34,8 +34,9 @@ func (s *Server) roots() []fileRoot {
 	if s.cfg == nil {
 		return out
 	}
-	for _, p := range s.cfg.Get().EnabledProfiles() {
-		for i, dir := range p.Sources {
+	c := s.cfg.Get()
+	for _, p := range c.EnabledProfiles() {
+		for i, dir := range c.Dirs(p) { // у кольцевого буфера — папка с копиями: имена в самом кольце сдвигаются
 			if samePath(dir, s.data) {
 				if out[0].Profile == "" { // папка из запуска принадлежит этому профилю
 					out[0].Profile, out[0].Name, out[0].Src = p.ID, p.Name, i

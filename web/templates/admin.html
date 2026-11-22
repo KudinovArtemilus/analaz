@@ -22,8 +22,7 @@
     <div class="empty">
       <div class="empty-title">Настройки не подключены</div>
       <div class="muted">Запустите сервер с файлом настроек:
-        <code>server.exe -config C:\press-go\pressgo.json</code><br>Если файла нет, он будет создан.
-      </div>
+        <code>server.exe -config C:\press-go\pressgo.json</code><br>Если файла нет, он будет создан.</div>
     </div>
     {{else}}
     {{with .Error}}<div class="card st-alarm"><b>Не сохранено:</b> {{.}}</div>{{end}}
@@ -54,6 +53,14 @@
         <label class="wide">Папки с .shp — по одной на строку
           <textarea name="sources" rows="3" placeholder="\\recorder\shp">{{join .Sources "\n"}}</textarea></label>
         <label class="inline"><input type="checkbox" name="enabled" {{if .Enabled}} checked{{end}}> включён</label>
+        <label class="inline"
+          title="регистратор пишет actual.shp → old01.shp, old02.shp… и сдвигает имена каждый цикл (пресс 5)"><input
+            type="checkbox" name="ring" {{if .Ring}} checked{{end}}> кольцевой буфер</label>
+        {{if .Ring}}{{with index $.Ring .ID}}<div class="small muted wide">Кольцо: последний проход {{.Last.Format
+          "02.01 15:04:05"}}, скопировано с запуска {{.Copied}}{{if not .LastNew.IsZero}} (последний новый цикл —
+          {{.LastNew.Format "02.01 15:04"}}){{end}}{{if .Pruned}}, удалено старых копий {{.Pruned}}{{end}}
+          {{with .Err}}<div class="st-alarm">Папка не открылась: {{.}}</div>{{end}}{{range .BadFiles}}<div
+            class="st-warn">{{.}}</div>{{end}}</div>{{end}}{{end}}
         <div class="actions">
           <button type="submit">Сохранить</button>
           <button type="button" hx-get="/admin/check?id={{.ID}}" hx-target="#check-{{.ID}}">Проверить папки</button>
@@ -75,6 +82,7 @@
         <label>Часовой пояс, ч <input name="tz" value="5" size="3"></label>
         <label class="wide">Папки с .shp — по одной на строку <textarea name="sources" rows="2"></textarea></label>
         <label class="inline"><input type="checkbox" name="enabled"> включён</label>
+        <label class="inline"><input type="checkbox" name="ring"> кольцевой буфер (actual.shp, old01.shp…)</label>
         <div class="actions"><button type="submit">Добавить</button></div>
       </form>
     </details>
@@ -91,6 +99,9 @@
         <label>Фон — каждый N-й цикл (по ходу штампа) <input name="keep_every" value="{{.C.Archive.KeepEvery}}"
             size="4"></label>
         <label>Потолок архива, ГБ <input name="max_gb" value="{{.C.Archive.MaxGB}}" size="5"></label>
+        <label>Копии кольцевого буфера, дней <input name="ring_days"
+            value="{{if .C.Archive.RingDays}}{{.C.Archive.RingDays}}{{else}}2{{end}}" size="3"> <span
+            class="muted small">папка данных\ring; ~2,4 ГБ в сутки у пресса 5</span></label>
         <div class="actions"><button type="submit">Сохранить</button></div>
       </form>
       <p class="muted small">Буфер регистратора хранит около двух недель. В архив (<b>папка
@@ -132,8 +143,7 @@
         {{featPerPass}} файлов на операцию: сначала новые файлы всех машин, потом пропуски в истории (пока буфер их не
         удалил). Файлы моложе 2 минут ждут следующего прохода — регистратор, возможно, ещё пишет. Строки из таблицы,
         сделанной утилитой extract (features_quick…), переносятся один раз — сама она не меняется. <b>Папки с .shp
-          только читаются.</b>
-      </p>
+          только читаются.</b></p>
       {{with .Feat}}
       <div class="arch-status small">
         {{if .Running}}<div class="note"><b>Идёт проход</b> с {{.Started.Format "15:04:05"}}: {{.Doing}}</div>{{end}}
@@ -148,8 +158,7 @@
           (повреждённых {{.Damaged}}){{end}}{{if .Merged}}, перенесено {{.Merged}} из {{.From}}{{end}}{{if .Todo}},
           <b>осталось посчитать {{.Todo}}</b>{{if .Stale}} (из них пересчёт по новой версии
           {{.Stale}}){{end}}{{end}}{{if .Young}}, ждут дозаписи {{.Young}}{{end}}{{if not (or .Added .Redone .Merged
-          .Todo .Err)}} — новых нет{{end}} <span class="muted">· {{.Table}}</span>
-        </div>
+          .Todo .Err)}} — новых нет{{end}} <span class="muted">· {{.Table}}</span></div>
         {{with .Err}}<div class="st-alarm">{{.}}</div>{{end}}
         {{range .Errors}}<div class="st-warn">{{.}}</div>{{end}}
         {{end}}
