@@ -165,11 +165,11 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 	op = analyze.JoinOp(base, regime)
 	data["Op"] = op
 	// чья операция: название машины в шапке; у машин, для которых узлы ещё не описаны
-	// (всё, кроме пресса 10 и КПС), — пометка, что пустой светофор не значит «в норме»
+	// (всё, кроме прессов 10 и 5 и КПС), — пометка, что пустой светофор не значит «в норме»
 	if s.cfg != nil {
 		if p := s.cfg.Get().ProfileFor(base); p != nil {
 			data["Machine"] = p.Name
-			data["NoUnits"] = p.Kind != "" && p.Kind != "press10" && p.Kind != "kps"
+			data["NoUnits"] = p.Kind != "" && p.Kind != "press10" && p.Kind != "press5" && p.Kind != "kps"
 			data["CommonNorm"] = p.Kind == "kps" && regime == "all" // все колёса вместе — норма общая
 		}
 	}

@@ -28,7 +28,7 @@ func safe(name string) string {
 // но срез там применяется к кортежу, а не к строке, — то есть имя НЕ обрезается. Повторяем как есть.
 func RawStats(f *shp.File, out Features) {
 	for j, name := range f.AnaNames {
-		if skipName.MatchString(name) {
+		if skipName.MatchString(name) || f.Absent(name) { // Absent — канала у этой машины нет (пресс 5: насосы 4–6…)
 			continue
 		}
 		key := fmt.Sprintf("a%03d_%s", j, safe(name))

@@ -34,12 +34,18 @@ func stepSeconds(f *shp.File) float64 {
 const (
 	PressVersion = 0 // пресс 10: признаки как в Python
 	KpsVersion   = 2 // КПС: 1 — признаки с физическим смыслом (kps_*), 21.11.2026; 2 — + минимум задания угла насосов, 22.11
+	// пресс 5: 1 — каналы под именами пресса 10 (усилие, работа, ход, гидростанция…), без отсутствующих
+	// каналов (насосы 4–6…), 22.11.2026
+	Press5Version = 1
 )
 
 // VersionFor — текущая версия признаков машины по типу профиля (config.Profile.Kind).
 func VersionFor(kind string) int {
-	if kind == "kps" {
+	switch kind {
+	case "kps":
 		return KpsVersion
+	case "press5":
+		return Press5Version
 	}
 	return PressVersion
 }
@@ -61,9 +67,12 @@ func Compute(f *shp.File) Features {
 	Cylinders(f, out)
 	Kps(f, dt, out) // КПС (OP3); у файлов пресса ничего не делает
 	RawStats(f, out)
-	if IsKps(f) {
+	switch {
+	case IsKps(f):
 		out["feat_ver"] = KpsVersion
-	} else {
+	case f.IsPress5():
+		out["feat_ver"] = Press5Version
+	default:
 		out["feat_ver"] = PressVersion
 	}
 	return out

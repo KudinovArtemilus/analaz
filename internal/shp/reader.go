@@ -60,6 +60,7 @@ type File struct {
 
 	anaIdx map[string]int
 	digIdx map[string]int
+	press5 bool // файл пресса 5: его каналы доступны и под именами пресса 10 (press5.go)
 }
 
 // NumSamples — число записей (отсчётов) в файле.
@@ -161,6 +162,8 @@ func Parse(d []byte) (*File, error) {
 			}
 		}
 	}
+
+	f.addAliases()
 
 	// ---- записи ----
 	digBytes := nDig / 8

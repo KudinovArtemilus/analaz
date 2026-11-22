@@ -23,7 +23,7 @@ func TestGroupsList(t *testing.T) {
 	if g := Groups[1].Feats; len(g) != 12 || g[0] != "pump11_pivot_err_active" || g[11] != "pump62_pivot_err_active" {
 		t.Errorf("насосы: %v", g)
 	}
-	if g := Groups[5].Feats; len(g) != 11 || g[6] != "vCCylR_Y22_1_err_rms" {
+	if g := Groups[5].Feats; len(g) != 12 || g[6] != "vCCylR_Y22_1_err_rms" || g[11] != "v12Y069_2_err_rms" { // 11 как в charts.py + клапан пресса 5
 		t.Errorf("сервоклапаны: %v", g)
 	}
 	// каждый признак групп должен иметь описание — иначе в легенде будет сырое имя

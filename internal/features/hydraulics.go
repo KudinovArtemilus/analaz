@@ -21,6 +21,9 @@ var simpleChannels = []struct{ name, key string }{
 	// зажим штампа: на этих двух каналах построен диагноз «утечка в контуре 2»
 	{"DieCl: reload press. circuit 1", "dieclamp_c1"},
 	{"DieCl: reload press. circuit 2", "dieclamp_c2"},
+	// пресс 5: аккумулятор кольцевого клапана RV2 и зажим нижнего штампа
+	{"slide: RV2 accu pressure[bar]", "accu_rv2"},
+	{"28-B013.1 lower die clamp press", "dieclamp_lower"},
 }
 
 // Hydraulics — гидростанция (высокое давление: просадка и восстановление),

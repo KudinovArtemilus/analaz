@@ -35,7 +35,7 @@ var pressGroups = []Group{
 	{"Высокое давление: минимум и просадка, бар", "Просадка растёт = насосы/аккумуляторы не держат.",
 		[]string{"hp_min", "hp_drop", "hp_mean"}},
 	{"Аккумуляторы и зажим штампа, бар", "Падение минимумов = азот/заряд/утечка контура.",
-		[]string{"accu_rv1_min", "accu_rv3_min", "dieclamp_c1_min", "dieclamp_c2_min"}},
+		[]string{"accu_rv1_min", "accu_rv3_min", "dieclamp_c1_min", "dieclamp_c2_min", "accu_rv2_min", "dieclamp_lower_min"}}, // два последних — пресс 5
 	{"Ползун: перекос лево-право, мм", "Рост = износ направляющих, разбаланс.", []string{"lr_dev_absmax_mm", "lr_dev_press_mean_mm"}},
 	{"Ползун: времена, с", "Рост при той же работе = гидравлика теряет производительность.",
 		[]string{"press_time_s", "force_rise_s", "press_start_s", "slide_moving_s"}},
@@ -70,7 +70,7 @@ func pumps(format string) []string {
 func servos(suffix string) []string {
 	var out []string
 	for _, k := range []string{"v12Y102", "v12Y069_21", "v12Y069_22", "v20Y019", "v31Y102",
-		"vCCylL_Y22_2", "vCCylR_Y22_1", "vLCylL_Y21_2", "vLCylR_Y21_1", "vMB_Y1", "vMB_Y2"} {
+		"vCCylL_Y22_2", "vCCylR_Y22_1", "vLCylL_Y21_2", "vLCylR_Y21_1", "vMB_Y1", "vMB_Y2", "v12Y069_2"} { // последний — пресс 5
 		out = append(out, k+suffix)
 	}
 	return out

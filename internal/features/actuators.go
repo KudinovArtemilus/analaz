@@ -14,6 +14,7 @@ var servos = []struct{ set, act, key string }{
 	{"slide:12Y069.22 set value [V]", "slide:12Y069.22 piston pos.[V]", "v12Y069_22"},
 	{"BEj:20Y019 set value [V]", "BEj:20Y019 piston pos.[V]", "v20Y019"},
 	{"SCu:31Y102: set value [V]", "SCu:31Y102:piston pos.[V]", "v31Y102"},
+	{"slide:12Y069_2 ring valve SetVa", "slide:12Y069_2 PinF[U]", "v12Y069_2"}, // пресс 5: клапан кольцевой стороны один
 	{"CCyl Left Prop Y22.2 U", "CCyl Left Prop Y22.2 PinF", "vCCylL_Y22_2"},
 	{"CCyl Right Prop Y22.1 U", "CCyl Right Prop Y22.1 PinF", "vCCylR_Y22_1"},
 	{"LCyl Left Prop Y21.2 U", "LCyl Left Prop Y21.2 PinF", "vLCylL_Y21_2"},
@@ -29,6 +30,9 @@ func Pumps(f *shp.File, dt float64, out Features) {
 		for b := 1; b <= 2; b++ {
 			p := fmt.Sprintf("Pump %d.%d ", a, b)
 			key := fmt.Sprintf("pump%d%d", a, b)
+			if f.Absent(p + "actPivoting") {
+				continue // насоса у машины нет (пресс 5: только 1.1–3.2)
+			}
 
 			sv, ok1 := f.Analog(p + "svValve")
 			av, ok2 := f.Analog(p + "avValve")
