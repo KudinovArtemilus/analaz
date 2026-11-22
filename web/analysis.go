@@ -54,7 +54,7 @@ type analysisEntry struct {
 
 var (
 	reTableOp = regexp.MustCompile(`(?i)^features.*_(OP\d+)\.csv\.gz$`)
-	reOp      = regexp.MustCompile(`(?i)^OP\d+(@(dv\d+-dw\d+|all))?$`) // OP3@dv860-dw895 — одно колесо КПС
+	reOp      = regexp.MustCompile(`(?i)^OP\d+(@(dv\d+-dw\d+|rcp\d+-\d+|all))?$`) // OP3@dv860-dw895 — колесо КПС, OP1@rcp60-650 — рецепт пресса
 )
 
 // tables — по каждой операции самая свежая таблица в папке.

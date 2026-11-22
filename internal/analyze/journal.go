@@ -88,7 +88,7 @@ func (r *Result) Journal() []Event {
 		}
 		wheel[i] = code[k]
 	}
-	if len(keys) > 1 {
+	if len(keys) > 1 && !IsRecipe(keys[0]) { // рецепт пресса — уже в событиях «штамп» (с рецептом)
 		lbl := func(c float64) string { return strings.TrimPrefix(RegimeLabel(keys[int(c)]), "колесо ") }
 		for _, c := range persistentChanges(wheel, JournalPersist) {
 			add(c.i, "wheel", fmt.Sprintf("Колесо: %s → %s", lbl(c.from), lbl(c.to)))

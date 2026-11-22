@@ -63,7 +63,7 @@ type stopView struct {
 	Before       []reasonJSON // Value — медиана 50 циклов до останова, Rm — норма
 }
 
-// regimeView — колесо для выбора на странице и его норма.
+// regimeView — колесо (КПС) или рецепт (пресс) для выбора на странице и его норма.
 type regimeView struct {
 	Op, Label  string
 	Cycles     int
@@ -87,8 +87,12 @@ func (s *Server) regimeViews(base, cur string, regs []analyze.Regime) []regimeVi
 		} else if rg.Cycles >= analyze.AutoNormCycles {
 			v.Norm = fmt.Sprintf("норма сохраняется (циклов %d ≥ %d) — обновите страницу через минуту", rg.Cycles, analyze.AutoNormCycles)
 		} else {
-			v.Norm = fmt.Sprintf("нормы пока нет: сохранится сама, когда будет %d рабочих циклов (сейчас %d); до тех пор — первые 20%% циклов этого колеса",
-				analyze.AutoNormCycles, rg.Cycles)
+			what := "колеса"
+			if analyze.IsRecipe(rg.Key) {
+				what = "рецепта"
+			}
+			v.Norm = fmt.Sprintf("нормы пока нет: сохранится сама, когда будет %d рабочих циклов (сейчас %d); до тех пор — первые 20%% циклов этого %s",
+				analyze.AutoNormCycles, rg.Cycles, what)
 		}
 		out = append(out, v)
 	}
@@ -146,9 +150,11 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 	}
 	base, regime := analyze.SplitOp(op)
 	data["BaseOp"] = base
-	// колёса (КПС): по умолчанию — то, что катают сейчас, со своей нормой; «@all» — все вместе
+	// колёса (КПС), рецепты (пресс): по умолчанию — то, что делают сейчас, со своей нормой;
+	// «@all» — все вместе. У пресса с одним рецептом (OP2) выбирать нечего — всё как раньше.
 	if base != "" {
-		if mixed, err := s.an.get(base); err == nil && len(mixed.Regimes) > 0 {
+		if mixed, err := s.an.get(base); err == nil && len(mixed.Regimes) > 0 &&
+			!(analyze.IsRecipe(mixed.Regimes[0].Key) && len(mixed.Regimes) < 2) {
 			if regime == "" {
 				cur := mixed.Regimes[0]
 				for _, rg := range mixed.Regimes {
@@ -160,18 +166,22 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 			}
 			data["Regimes"] = s.regimeViews(base, regime, mixed.Regimes)
 			data["AllOp"], data["AllOn"] = base+"@all", regime == "all"
+			data["RegimeWord"], data["AllWord"] = "колесо", "все колёса вместе"
+			if analyze.IsRecipe(mixed.Regimes[0].Key) {
+				data["RegimeWord"], data["AllWord"], data["Recipes"] = "рецепт", "все рецепты вместе", true
+			}
 			s.ensureWheelNorms(base, mixed.Regimes)
 		}
 	}
 	op = analyze.JoinOp(base, regime)
 	data["Op"] = op
+	data["CommonNorm"] = regime == "all" && data["Regimes"] != nil // все колёса / рецепты вместе — норма общая
 	// чья операция: название машины в шапке; у машин, для которых узлы ещё не описаны
 	// (всё, кроме прессов 10 и 5 и КПС), — пометка, что пустой светофор не значит «в норме»
 	if s.cfg != nil {
 		if p := s.cfg.Get().ProfileFor(base); p != nil {
 			data["Machine"] = p.Name
 			data["NoUnits"] = p.Kind != "" && p.Kind != "press10" && p.Kind != "press5" && p.Kind != "kps"
-			data["CommonNorm"] = p.Kind == "kps" && regime == "all" // все колёса вместе — норма общая
 		}
 	}
 	version := features.PressVersion // версия признаков машины: строки старее — посчитаны прежним расчётом
@@ -196,6 +206,8 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 
 	sum := summarize(base, res, at, s.human) // в шапке — операция; колесо — отдельно (RegimeLabel)
 	switch {
+	case regime == "all" && data["Recipes"] == true:
+		data["RegimeLabel"] = "все рецепты"
 	case regime == "all":
 		data["RegimeLabel"] = "все колёса"
 	case regime != "":

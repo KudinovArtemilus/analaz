@@ -12,8 +12,12 @@ import (
 // их: смена колеса выглядит как поломка. Поэтому анализ можно считать внутри одного колеса —
 // со своей нормой (её сервер сохраняет сам, когда у колеса набралось AutoNormCycles циклов).
 //
-// В имени операции режим пишется через @: «OP3@dv860-dw895». Без @ — все колёса вместе, как раньше.
-// У пресса режимов нет (нет kps_wheel_*) — у него ничего не меняется.
+// У пресса режим — рецепт: скорость опускания ползуна и позиция нижних цилиндров (RecipeChannels).
+// У OP1 их три (60/650, 45/655, 50/645), и усилие у них разное: 26,6 / 21,8 / 17,7 МН. Позиция SCu
+// в ключ не входит: у OP2 она меняется внутри одной установки штампа (0, 41…59) — это не рецепт.
+//
+// В имени операции режим пишется через @: «OP3@dv860-dw895», «OP1@rcp60-650». Без @ — все вместе,
+// как раньше: там анализ пресса не изменился ни в чём.
 
 // AutoNormCycles — после стольких рабочих циклов колеса сервер сохраняет его норму (первые столько).
 // Переменная — только чтобы тесты не создавали по 200 циклов.
@@ -28,26 +32,58 @@ type Regime struct {
 	Cycles int
 }
 
-// RegimeKey — режим цикла i ("" — режима нет: не КПС или размеры не записаны).
+// RegimeMinCycles — режим с меньшим числом циклов не показывается отдельно: это единичный
+// сбойный цикл (повреждённый .shp, наладка), а не рецепт.
+const RegimeMinCycles = 3
+
+// RegimeKey — режим цикла i ("" — режима нет: размеры колеса или рецепт не записаны).
 func RegimeKey(d *Dataset, i int) string {
-	dv, dw := d.Col("kps_wheel_dv"), d.Col("kps_wheel_dw")
-	if dv == nil || dw == nil || math.IsNaN(dv[i]) || math.IsNaN(dw[i]) {
+	if dv, dw := d.Col("kps_wheel_dv"), d.Col("kps_wheel_dw"); dv != nil && dw != nil {
+		if math.IsNaN(dv[i]) || math.IsNaN(dw[i]) {
+			return ""
+		}
+		return fmt.Sprintf("dv%d-dw%d", int(math.Round(dv[i])), int(math.Round(dw[i])))
+	}
+	sp, lc := d.Col(RecipeChannels[0]), d.Col(RecipeChannels[1])
+	if sp == nil || lc == nil {
 		return ""
 	}
-	return fmt.Sprintf("dv%d-dw%d", int(math.Round(dv[i])), int(math.Round(dw[i])))
-}
-
-// RegimeLabel — «колесо DV 860 / DW 895» по ключу.
-func RegimeLabel(key string) string {
-	var dv, dw int
-	if _, err := fmt.Sscanf(key, "dv%d-dw%d", &dv, &dw); err != nil {
-		return key
+	v, c := math.Round(sp[i]), math.Round(lc[i])
+	if !(v >= 1 && v <= 500 && c >= 100 && c <= 3000) { // NaN и мусор повреждённых записей (233254 / −1576)
+		return ""
 	}
-	return fmt.Sprintf("колесо DV %d / DW %d", dv, dw)
+	return fmt.Sprintf("rcp%d-%d", int(v), int(c))
 }
 
-// Regimes — режимы в данных в порядке первого появления (по времени).
+// IsRecipe — режим пресса (рецепт), а не колесо КПС.
+func IsRecipe(key string) bool { return strings.HasPrefix(key, "rcp") }
+
+// RegimeLabel — «колесо DV 860 / DW 895», «рецепт 60 / 650» по ключу.
+func RegimeLabel(key string) string {
+	var a, b int
+	if _, err := fmt.Sscanf(key, "dv%d-dw%d", &a, &b); err == nil {
+		return fmt.Sprintf("колесо DV %d / DW %d", a, b)
+	}
+	if _, err := fmt.Sscanf(key, "rcp%d-%d", &a, &b); err == nil {
+		return fmt.Sprintf("рецепт %d / %d", a, b)
+	}
+	return key
+}
+
+// Regimes — режимы в данных в порядке первого появления (по времени); режимы меньше
+// RegimeMinCycles циклов не показываются.
 func Regimes(d *Dataset) []Regime {
+	all := regimesAll(d)
+	out := all[:0]
+	for _, r := range all {
+		if r.Cycles >= RegimeMinCycles {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func regimesAll(d *Dataset) []Regime {
 	var out []Regime
 	at := map[string]int{}
 	for i := range d.Len() {
