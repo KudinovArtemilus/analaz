@@ -8,8 +8,6 @@
 *.log
 *.ps1
 norm_*.json
-features/
-archive/
 node_modules/
 pressgo.json
 analyze_go/

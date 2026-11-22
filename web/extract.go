@@ -13,6 +13,7 @@ import (
 
 	"github.com/KudinovArtemilus/press-go/internal/batch"
 	"github.com/KudinovArtemilus/press-go/internal/extract"
+	"github.com/KudinovArtemilus/press-go/internal/features"
 )
 
 // featRunner — признаки по расписанию (этап 8): раз в N минут смотрит в папки всех включённых
@@ -44,6 +45,12 @@ type featRunner struct {
 type featDone struct {
 	mod   time.Time
 	files map[string]bool
+	stale map[string]bool // посчитаны старой версией признаков (по имени файла) — пересчитать
+}
+
+// doneOf — что посчитано и что пересчитать, по таблице.
+func doneOf(t *batch.Table, mod time.Time, version int) featDone {
+	return featDone{mod: mod, files: t.Files(), stale: t.Stale(version)}
 }
 
 const (
@@ -75,6 +82,8 @@ type featOpStatus struct {
 	Todo    int // осталось посчитать (после этого прохода)
 	Young   int
 	Damaged int
+	Redone  int    // пересчитано по новой версии признаков
+	Stale   int    // ещё ждут пересчёта (среди файлов, что есть в папках)
 	Merged  int    // перенесено строк из другой таблицы (features_quick…)
 	From    string // откуда перенесены
 	Errors  []string
@@ -119,6 +128,7 @@ func (fr *featRunner) Start(every time.Duration) {
 // featJob — одна операция в проходе: что посчитать, и куда.
 type featJob struct {
 	name, op string // профиль и операция
+	version  int    // версия признаков машины
 	target   string
 	opt      extract.Options
 	todo     []string // сначала новые, потом история
@@ -189,7 +199,7 @@ func (fr *featRunner) Run() bool {
 		for _, op := range p.Ops {
 			fr.setDoing(p.Name + " · " + op + ": смотрю папку…")
 			st.Ops = append(st.Ops, featOpStatus{Profile: p.Name, Op: op})
-			if j := fr.plan(p.Name, op, dir, roots, loc, &st.Ops[len(st.Ops)-1]); j != nil {
+			if j := fr.plan(p.Name, op, features.VersionFor(p.Kind), dir, roots, loc, &st.Ops[len(st.Ops)-1]); j != nil {
 				jobs = append(jobs, j)
 			}
 		}
@@ -208,11 +218,12 @@ func (fr *featRunner) Run() bool {
 				j.st.Err = fmt.Sprintf("не записать %s: %v", j.target, err)
 				fr.forget(j.op)
 			} else {
-				fr.remember(j.op, featDone{mod: modTime(j.target), files: j.table.Files()})
+				fr.remember(j.op, doneOf(j.table, modTime(j.target), j.version))
 			}
 			j.table = nil
 		}
 		j.st.Todo = len(j.todo) - j.taken
+		j.st.Stale = max(j.st.Stale-j.st.Redone, 0)
 		fr.logOp(*j.st)
 	}
 	return true
@@ -223,10 +234,13 @@ func (fr *featRunner) logOp(r featOpStatus) {
 		log.Printf("признаки %s %s: %s", r.Profile, r.Op, r.Err)
 		return
 	}
-	if r.Added == 0 && r.Merged == 0 && len(r.Errors) == 0 {
+	if r.Added == 0 && r.Redone == 0 && r.Merged == 0 && len(r.Errors) == 0 {
 		return
 	}
 	msg := fmt.Sprintf("признаки %s %s: добавлено %d", r.Profile, r.Op, r.Added)
+	if r.Redone > 0 {
+		msg += fmt.Sprintf(", пересчитано по новой версии %d (ждут ещё %d)", r.Redone, r.Stale)
+	}
 	if r.Damaged > 0 {
 		msg += fmt.Sprintf(" (повреждённых %d)", r.Damaged)
 	}
@@ -241,7 +255,7 @@ func (fr *featRunner) logOp(r featOpStatus) {
 
 // plan — что нового у операции: перенос из чужой таблицы и список файлов. nil — делать нечего
 // (или ошибка — она уже в st).
-func (fr *featRunner) plan(name, op, dir string, roots []string, loc *time.Location, st *featOpStatus) *featJob {
+func (fr *featRunner) plan(name, op string, version int, dir string, roots []string, loc *time.Location, st *featOpStatus) *featJob {
 	target := filepath.Join(dir, "features_"+op+".csv.gz")
 	st.Table = target
 
@@ -281,7 +295,7 @@ func (fr *featRunner) plan(name, op, dir string, roots []string, loc *time.Locat
 			fr.merged[other] = modTime(other)
 			fr.mu.Unlock()
 		}
-		d = featDone{mod: tmod, files: table.Files()}
+		d = doneOf(table, tmod, version)
 		if st.Merged == 0 {
 			fr.remember(op, d)
 		}
@@ -291,6 +305,7 @@ func (fr *featRunner) plan(name, op, dir string, roots []string, loc *time.Locat
 	now := fr.now()
 	opt := extract.Options{
 		Roots: roots, Filter: batch.Filter{Op: op}, Jobs: featJobs, Loc: loc, FreshFirst: true, MinAge: featMinAge,
+		Stale: d.stale,
 		Skip: func(p string) bool {
 			fr.mu.Lock()
 			defer fr.mu.Unlock()
@@ -303,14 +318,14 @@ func (fr *featRunner) plan(name, op, dir string, roots []string, loc *time.Locat
 		st.Err = fmt.Sprintf("папка с .shp недоступна: %v", err)
 		return nil
 	}
-	st.Todo, st.Young = ps.Todo, ps.Young
+	st.Todo, st.Young, st.Stale = ps.Todo, ps.Young, ps.Stale
 	if len(todo) == 0 && st.Merged == 0 {
 		return nil
 	}
 	if st.Merged == 0 {
 		table = nil // таблицу прочитаем, когда дойдёт очередь: держать в памяти все сразу незачем
 	}
-	return &featJob{name: name, op: op, target: target, opt: opt, todo: todo, fresh: ps.Fresh, table: table, st: st}
+	return &featJob{name: name, op: op, version: version, target: target, opt: opt, todo: todo, fresh: ps.Fresh, table: table, st: st}
 }
 
 // apply — посчитать files и дописать таблицу операции.
@@ -350,6 +365,7 @@ func (fr *featRunner) apply(j *featJob, files []string, phase string) {
 		}
 	}
 	j.st.Added += as.Added
+	j.st.Redone += as.Redone
 	j.st.Damaged += as.Damaged
 	j.st.Rows = j.table.Len()
 	now := fr.now()
@@ -363,7 +379,7 @@ func (fr *featRunner) apply(j *featJob, files []string, phase string) {
 			j.st.Errors = append(j.st.Errors, firstLine(e.Err.Error()))
 		}
 	}
-	fr.remember(j.op, featDone{mod: modTime(j.target), files: j.table.Files()})
+	fr.remember(j.op, doneOf(j.table, modTime(j.target), j.version))
 	j.table = nil // следующую фазу — с диска: все таблицы сразу в памяти не держим
 }
 

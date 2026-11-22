@@ -1,445 +1,310 @@
-package web
+// Package extract — дописать в таблицу признаков циклы, которых в ней ещё нет.
+// Общий код утилиты extract и сервера (этап 8): утилита запускается руками,
+// сервер зовёт то же самое по расписанию.
+//
+// Таблица только дописывается: строки уже посчитанных циклов остаются, даже когда
+// буфер удалил сами .shp, — так копится история. Папки-источники только читаются.
+package extract
 
 import (
-	"errors"
 	"fmt"
-	"log"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
+	"runtime/debug"
 	"time"
 
 	"github.com/KudinovArtemilus/press-go/internal/batch"
-	"github.com/KudinovArtemilus/press-go/internal/extract"
 	"github.com/KudinovArtemilus/press-go/internal/features"
+	"github.com/KudinovArtemilus/press-go/internal/shp"
 )
 
-// featRunner — признаки по расписанию (этап 8): раз в N минут смотрит в папки всех включённых
-// профилей, считает признаки по новым .shp и дописывает таблицу features_<OP>.csv.gz в папке таблиц.
-// Анализ пересчитывается сам (видит, что таблица изменилась), архив отбирает уже по свежим данным.
-//
-// Проход в две фазы: сначала новые файлы всех машин, потом история (пропуски, которые буфер
-// скоро удалит). Иначе новая машина ждала бы, пока другая досчитает свой буфер за часы.
-//
-// Папки-источники только читаются. Чужие таблицы (features_quick_OP1 от утилиты extract)
-// не меняются: их строки один раз переносятся в features_<OP>.csv.gz, чтобы история не пропала.
-type featRunner struct {
-	s       *Server
-	mu      sync.Mutex
-	running bool
-	started time.Time
-	doing   string // что делается сейчас — для «Настроек» во время прохода
-	st      featStatus
-	done    map[string]featDone           // по операции: что уже в таблице
-	failed  map[string]time.Time          // файл → когда не прочитался (не повторяем каждые 5 минут)
-	merged  map[string]time.Time          // чужая таблица → её время, когда переносили (второй раз ту же не читаем)
-	now     func() time.Time              // для тестов
-	perPass int                           // featPerPass; меньше — только в тестах
-	onApply func(op, phase string, n int) // для тестов: вызывается перед подсчётом
+// Result — что получилось по одному файлу.
+type Result struct {
+	Damage string // описание повреждения записей, если есть
+	Path   string // как нашли при обходе
+	File   string // абсолютный путь — так он хранится в колонке file
+	Op     string
+	TStart string
+	F      features.Features
+	Err    error
 }
 
-// featDone — множество посчитанных файлов и время таблицы, по которому оно снято:
-// таблицу целиком (сотни МБ) читаем, только когда есть что добавить.
-type featDone struct {
-	mod   time.Time
-	files map[string]bool
-	stale map[string]bool // посчитаны старой версией признаков (по имени файла) — пересчитать
-}
-
-// doneOf — что посчитано и что пересчитать, по таблице.
-func doneOf(t *batch.Table, mod time.Time, version int) featDone {
-	return featDone{mod: mod, files: t.Files(), stale: t.Stale(version)}
-}
-
-const (
-	featPerPass  = 500             // не больше файлов операции за проход: остальные машины не ждут часами
-	featJobs     = 2               // файлов одновременно: буфер — сетевая папка, больше не быстрее
-	featMinAge   = 2 * time.Minute // моложе — регистратор, возможно, ещё пишет
-	featRetryErr = time.Hour       // файл с ошибкой пробуем снова не раньше
-)
-
-// featStatus — итог последнего законченного прохода и, если идёт, текущий (для «Настроек»).
-type featStatus struct {
-	At    time.Time
-	Took  time.Duration
-	Ops   []featOpStatus
-	Note  string // почему не работает
-	Every time.Duration
-
-	Running bool      // проход идёт прямо сейчас
-	Started time.Time // когда начался текущий
-	Doing   string    // что делается: «Пресс 10 · OP1, новые: 230 из 500»
-}
-
-type featOpStatus struct {
-	Profile string // название профиля («Пресс 10», «КПС»)
-	Op      string
-	Table   string
-	Rows    int // строк в таблице после прохода
-	Added   int
-	Todo    int // осталось посчитать (после этого прохода)
-	Young   int
-	Damaged int
-	Redone  int    // пересчитано по новой версии признаков
-	Stale   int    // ещё ждут пересчёта (среди файлов, что есть в папках)
-	Merged  int    // перенесено строк из другой таблицы (features_quick…)
-	From    string // откуда перенесены
-	Errors  []string
-	Err     string
-}
-
-func newFeatRunner(s *Server) *featRunner {
-	return &featRunner{s: s, done: map[string]featDone{}, failed: map[string]time.Time{}, merged: map[string]time.Time{}, now: time.Now, perPass: featPerPass}
-}
-
-// Status — копия статуса: последний законченный проход плюс что делается сейчас.
-func (fr *featRunner) Status() featStatus {
-	if fr == nil {
-		return featStatus{Note: "без файла настроек"}
-	}
-	fr.mu.Lock()
-	defer fr.mu.Unlock()
-	st := fr.st
-	st.Running, st.Started, st.Doing = fr.running, fr.started, fr.doing
-	return st
-}
-
-func (fr *featRunner) setDoing(s string) {
-	fr.mu.Lock()
-	fr.doing = s
-	fr.mu.Unlock()
-}
-
-// Start — проход сейчас и потом каждые every. Возвращается сразу.
-func (fr *featRunner) Start(every time.Duration) {
-	fr.mu.Lock()
-	fr.st.Every = every
-	fr.mu.Unlock()
-	go func() {
-		for {
-			fr.Run()
-			time.Sleep(every)
-		}
-	}()
-}
-
-// featJob — одна операция в проходе: что посчитать, и куда.
-type featJob struct {
-	name, op string // профиль и операция
-	version  int    // версия признаков машины
-	target   string
-	opt      extract.Options
-	todo     []string // сначала новые, потом история
-	fresh    int      // сколько в начале todo новых
-	taken    int      // взято в этом проходе
-	table    *batch.Table
-	st       *featOpStatus
-}
-
-// Run — один проход по всем включённым профилям. true — проход сделан; false — уже шёл другой
-// (тогда ничего не делает: кнопка во время планового прохода второй параллельно не запустит).
-func (fr *featRunner) Run() bool {
-	fr.mu.Lock()
-	if fr.running {
-		fr.mu.Unlock()
-		return false
-	}
-	fr.running, fr.started, fr.doing = true, fr.now(), "смотрю папки…"
-	every := fr.st.Every
-	fr.mu.Unlock()
-
-	st := featStatus{At: fr.now(), Every: every}
+// Process — признаки одного файла. Паника (выход за границы массива на битом файле)
+// не должна уронить обработку тысяч файлов: ловим её и превращаем в ошибку этого файла.
+func Process(path string, loc *time.Location) (res Result) {
+	res.Path = path
 	defer func() {
-		st.Took = time.Since(st.At).Round(time.Millisecond)
-		fr.mu.Lock()
-		fr.st, fr.running, fr.doing = st, false, ""
-		fr.mu.Unlock()
-	}()
-
-	if fr.s.cfg == nil {
-		st.Note = "без файла настроек"
-		return true
-	}
-	c := fr.s.cfg.Get()
-	profiles := c.EnabledProfiles()
-	dir := ""
-	if fr.s.an != nil {
-		dir, _ = fr.s.an.dirs() // та же папка, что у анализа (в т. ч. из -features)
-	}
-	switch {
-	case dir == "":
-		st.Note = "папка таблиц признаков не задана — «Хранение» → «Таблицы признаков»"
-		return true
-	case len(profiles) == 0:
-		st.Note = "нет включённого профиля"
-		return true
-	}
-
-	// --- что где посчитать: все операции всех включённых профилей ---
-	// Таблицы — в одной папке, по операции; операция у включённых профилей одна на всех (config.Validate).
-	n := 0
-	for _, p := range profiles {
-		n += max(len(p.Ops), 1)
-	}
-	st.Ops = make([]featOpStatus, 0, n) // ёмкость сразу на все: указатели на элементы не «переедут»
-	var jobs []*featJob
-	for i, p := range profiles {
-		roots := p.Sources
-		if len(roots) == 0 && i == 0 {
-			roots = []string{fr.s.data} // папка из -data при запуске относится к первому профилю
+		if p := recover(); p != nil {
+			res.Err = fmt.Errorf("%s: паника: %v\n%s", path, p, debug.Stack())
 		}
-		if len(roots) == 0 {
-			st.Ops = append(st.Ops, featOpStatus{Profile: p.Name, Op: strings.Join(p.Ops, ", "),
-				Err: "у профиля не указаны папки с .shp — «Настройки» → профиль"})
+	}()
+	f, err := shp.Read(path)
+	if err != nil {
+		res.Err = err
+		return res
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		res.Err = fmt.Errorf("%s: %w", path, err)
+		return res
+	}
+	f.Path = abs
+	res.File = abs
+	res.Op = shp.ParseName(abs, loc).Op
+	t := shp.StartTime(f, loc)
+	if t.Year() < 2000 {
+		// ни в имени, ни в заголовке нормального времени нет: без времени цикл
+		// не встанет на ось времени и испортит тренды и остановы — лучше честная ошибка
+		res.Err = fmt.Errorf("%s: не удалось определить время цикла (в имени и в заголовке)", path)
+		return res
+	}
+	res.TStart = t.Format("2006-01-02 15:04:05")
+	res.F = features.Compute(f)
+	if f.Damage.Serious() {
+		res.Damage = f.Damage.String()
+	}
+	return res
+}
+
+// Options — что и как обрабатывать.
+type Options struct {
+	Roots  []string     // папки с .shp (обходятся рекурсивно)
+	Filter batch.Filter // даты и операция
+	Every  int          // каждый N-й файл (1 — все)
+	Limit  int          // не больше N файлов за вызов (0 — без предела)
+	Jobs   int          // файлов одновременно
+	Loc    *time.Location
+
+	// FreshFirst — сначала файлы новее последнего посчитанного (то, что пришло с прошлого раза),
+	// потом пропуски в старых (их буфер скоро удалит). Без флага — просто по времени, как Python.
+	FreshFirst bool
+	// MinAge — не брать файлы моложе этого: регистратор, возможно, ещё пишет их.
+	MinAge time.Duration
+	// Stale — циклы (по имени файла, batch.FileName), посчитанные старой версией признаков:
+	// их надо пересчитать, хоть они и в таблице. Идут в историю (после новых); строка заменяется.
+	Stale map[string]bool
+	// Skip — не брать этот файл (сервер не повторяет недавние ошибки каждые 5 минут).
+	Skip func(path string) bool
+	// SaveEvery — сохранять таблицу каждые N добавленных циклов (0 — 500).
+	SaveEvery int
+	// Progress — сколько файлов из todo уже обработано (после каждого файла); nil — не звать.
+	Progress func(done, total int)
+	// Log — сообщения о ходе; nil — молчать. Verbose — ещё и по каждому файлу.
+	Log     func(format string, a ...any)
+	Verbose bool
+}
+
+// Stats — итог вызова.
+type Stats struct {
+	Found   int      // файлов в папках (после Every)
+	Done    int      // уже было в таблице до вызова
+	Todo    int      // ещё не посчитано (до Limit)
+	Fresh   int      // из них новых (после последнего посчитанного) — в начале списка, если FreshFirst
+	Stale   int      // из них — пересчёт старой версии признаков
+	Redone  int      // пересчитано (строка заменена) в этот раз
+	Taken   int      // взято в работу в этот раз
+	Added   int      // добавлено строк
+	Damaged int      // из них с повреждёнными записями
+	Young   int      // отложено: файл ещё может писаться
+	Errors  []Result // файлы с ошибками
+	Saves   int      // сколько раз таблица записана
+}
+
+// Update дописывает в table циклы из opt.Roots, которых в ней нет, и сохраняет её в outPath
+// (каждые SaveEvery циклов и в конце). Если добавить нечего — файл не трогается.
+func Update(table *batch.Table, outPath string, opt Options) (Stats, error) {
+	todo, st, err := Plan(table.Files(), opt)
+	if err != nil || len(todo) == 0 {
+		return st, err
+	}
+	return Apply(table, outPath, todo, st, opt)
+}
+
+// Plan — какие файлы посчитать: есть в папках, нет в done (колонка file таблицы).
+// Таблица для этого не нужна — сервер держит в памяти только done и читает таблицу,
+// лишь когда есть что добавить.
+func Plan(done map[string]bool, opt Options) ([]string, Stats, error) {
+	var st Stats
+	logf := logger(opt)
+	every, jobs := max(opt.Every, 1), max(opt.Jobs, 1)
+	st.Done = len(done)
+
+	// --- что нужно посчитать ---
+	var all []string
+	for _, root := range opt.Roots {
+		p, err := batch.ListFiles(root, opt.Filter)
+		if err != nil {
+			return nil, st, err
+		}
+		all = append(all, p...)
+	}
+	var files []string
+	for i := 0; i < len(all); i += every {
+		files = append(files, all[i])
+	}
+	st.Found = len(files)
+
+	// files отсортированы по времени из имени: «свежие» — после последнего посчитанного
+	// «уже посчитан» — по полному пути (как в Python) или по имени файла: имя уникально
+	// (заготовка, плавка, операция, дата и время до секунды), а путь к той же папке бывает
+	// разным — \\SERVER\share и \\server\share, сетевой путь и подключённый диск. Без этого
+	// один цикл попал бы в таблицу дважды под разными путями и исказил анализ.
+	doneName := make(map[string]bool, len(done))
+	for f := range done {
+		doneName[batch.FileName(f)] = true
+	}
+	lastDone := -1
+	isDone := make([]bool, len(files)) // в таблице и пересчитывать не надо
+	stale := make([]bool, len(files))  // в таблице, но старой версией — пересчитать
+	for i, p := range files {
+		if abs, _ := filepath.Abs(p); done[abs] || doneName[batch.FileName(p)] {
+			lastDone = i
+			if opt.Stale[batch.FileName(p)] {
+				stale[i] = true
+			} else {
+				isDone[i] = true
+			}
+		}
+	}
+	// «Молодые» (регистратор, возможно, ещё пишет) бывают только в конце списка: идём от новых
+	// к старым и останавливаемся после трёх дописанных подряд. Так stat делается для нескольких
+	// файлов, а не для тысяч по сети (у новой таблицы «свежие» — весь буфер). Не на первом
+	// дописанном: порядок по имени и порядок записи могут не совпасть (два файла пишутся
+	// одновременно), и молодой файл перед дописанным проскочил бы в работу недописанным.
+	young := map[int]bool{}
+	now := time.Now()
+	if opt.MinAge > 0 {
+		old := 0
+		for i := len(files) - 1; i > lastDone && old < 3; i-- {
+			if isDone[i] || stale[i] {
+				continue
+			}
+			fi, err := os.Stat(files[i])
+			if err != nil {
+				continue
+			}
+			if now.Sub(fi.ModTime()) < opt.MinAge {
+				young[i], old = true, 0
+			} else {
+				old++
+			}
+		}
+	}
+	var fresh, gaps []string
+	for i, p := range files {
+		if isDone[i] || (opt.Skip != nil && opt.Skip(p)) {
 			continue
 		}
-		loc := time.FixedZone(fmt.Sprintf("UTC%+d", p.TZ), p.TZ*3600)
-		for _, op := range p.Ops {
-			fr.setDoing(p.Name + " · " + op + ": смотрю папку…")
-			st.Ops = append(st.Ops, featOpStatus{Profile: p.Name, Op: op})
-			if j := fr.plan(p.Name, op, features.VersionFor(p.Kind), dir, roots, loc, &st.Ops[len(st.Ops)-1]); j != nil {
-				jobs = append(jobs, j)
-			}
+		if young[i] {
+			st.Young++
+			continue
+		}
+		if stale[i] {
+			st.Stale++
+		}
+		if (i > lastDone || !opt.FreshFirst) && !stale[i] {
+			fresh = append(fresh, p)
+		} else {
+			gaps = append(gaps, p) // пропуски истории и пересчёт старой версии — после новых
 		}
 	}
-	// --- фаза 1: новые файлы всех машин; фаза 2: история, в остаток лимита ---
-	for _, j := range jobs {
-		fr.apply(j, j.todo[:min(j.fresh, fr.perPass)], "новые")
+	todo := append(fresh, gaps...)
+	st.Todo, st.Fresh = len(todo), len(fresh)
+	if opt.Limit > 0 && len(todo) > opt.Limit {
+		todo = todo[:opt.Limit]
 	}
-	for _, j := range jobs {
-		rest := j.todo[j.taken:]
-		fr.apply(j, rest[:min(len(rest), fr.perPass-j.taken)], "история")
+	st.Taken = len(todo)
+	logf("Найдено файлов: %d, уже обработано: %d, к обработке: %d, потоков: %d\n",
+		len(files), len(done), len(todo), jobs)
+	return todo, st, nil
+}
+
+// Apply — посчитать todo (из Plan) и дописать в table, сохраняя в outPath.
+func Apply(table *batch.Table, outPath string, todo []string, st Stats, opt Options) (Stats, error) {
+	logf := logger(opt)
+	jobs, saveEvery := max(opt.Jobs, 1), opt.SaveEvery
+	if saveEvery <= 0 {
+		saveEvery = 500
 	}
-	for _, j := range jobs {
-		if j.table != nil && j.st.Err == "" { // перенесли строки, а файлов не было — всё равно сохранить
-			if err := extract.Save(j.table, j.target); err != nil {
-				j.st.Err = fmt.Sprintf("не записать %s: %v", j.target, err)
-				fr.forget(j.op)
+
+	// --- пул воркеров ---
+	// paths: главный → воркеры; results: воркеры → главный.
+	// В таблицу пишет только главная горутина, поэтому мьютекс не нужен.
+	paths := make(chan string)
+	results := make(chan Result)
+	for w := 0; w < jobs; w++ {
+		go func() {
+			for p := range paths {
+				results <- Process(p, opt.Loc)
+			}
+		}()
+	}
+	go func() {
+		for _, p := range todo {
+			paths <- p
+		}
+		close(paths) // воркеры выйдут из цикла, когда файлы кончатся
+	}()
+
+	t0 := time.Now()
+	sinceSave := 0
+	var saveErr error
+	for k := 1; k <= len(todo); k++ {
+		r := <-results // читаем все результаты до конца, даже после ошибки записи: иначе воркеры зависнут
+		if r.Err != nil {
+			st.Errors = append(st.Errors, r)
+			logf("ОШИБКА: %v\n", r.Err) // путь уже внутри ошибки
+		} else {
+			table.Set(r.File, r.Op, r.TStart, r.F) // старая версия — заменяется, новый — дописывается
+			if opt.Stale[batch.FileName(r.File)] {
+				st.Redone++
 			} else {
-				fr.remember(j.op, doneOf(j.table, modTime(j.target), j.version))
+				st.Added++
 			}
-			j.table = nil
+			sinceSave++
+			if r.Damage != "" {
+				st.Damaged++
+				logf("ПОВРЕЖДЁН: %s: %s\n", r.Path, r.Damage)
+			}
+			if opt.Verbose {
+				logf("[%d/%d] OK  %s\n", k, len(todo), r.Path)
+			}
 		}
-		j.st.Todo = len(j.todo) - j.taken
-		j.st.Stale = max(j.st.Stale-j.st.Redone, 0)
-		fr.logOp(*j.st)
-	}
-	return true
-}
-
-func (fr *featRunner) logOp(r featOpStatus) {
-	if r.Err != "" {
-		log.Printf("признаки %s %s: %s", r.Profile, r.Op, r.Err)
-		return
-	}
-	if r.Added == 0 && r.Redone == 0 && r.Merged == 0 && len(r.Errors) == 0 {
-		return
-	}
-	msg := fmt.Sprintf("признаки %s %s: добавлено %d", r.Profile, r.Op, r.Added)
-	if r.Redone > 0 {
-		msg += fmt.Sprintf(", пересчитано по новой версии %d (ждут ещё %d)", r.Redone, r.Stale)
-	}
-	if r.Damaged > 0 {
-		msg += fmt.Sprintf(" (повреждённых %d)", r.Damaged)
-	}
-	if r.Merged > 0 {
-		msg += fmt.Sprintf(", перенесено из %s %d", r.From, r.Merged)
-	}
-	if len(r.Errors) > 0 {
-		msg += fmt.Sprintf(", ошибок %d", len(r.Errors))
-	}
-	log.Printf("%s, осталось посчитать %d, в таблице %d", msg, r.Todo, r.Rows)
-}
-
-// plan — что нового у операции: перенос из чужой таблицы и список файлов. nil — делать нечего
-// (или ошибка — она уже в st).
-func (fr *featRunner) plan(name, op string, version int, dir string, roots []string, loc *time.Location, st *featOpStatus) *featJob {
-	target := filepath.Join(dir, "features_"+op+".csv.gz")
-	st.Table = target
-
-	// Есть ли таблица этой операции новее нашей (утилиту extract запустили руками) —
-	// её строки переносим. С первого раза это features_quick_OP1: история не пропадает.
-	var other string
-	tmod := modTime(target)
-	if tabs, err := fr.s.an.tables(); err == nil {
-		o := tabs[op]
-		fr.mu.Lock()
-		seen, was := fr.merged[o]
-		fr.mu.Unlock()
-		if o != "" && !samePath(o, target) && modTime(o).After(tmod) && !(was && seen.Equal(modTime(o))) {
-			other = o
+		if opt.Progress != nil {
+			opt.Progress(k, len(todo))
+		}
+		if k%100 == 0 || k == len(todo) {
+			rate := float64(k) / time.Since(t0).Seconds()
+			logf("--- %d/%d  %.1f файл/с  осталось ~%.0f мин\n", k, len(todo), rate, float64(len(todo)-k)/rate/60)
+		}
+		if saveErr == nil && sinceSave > 0 && (sinceSave >= saveEvery || k == len(todo)) {
+			if saveErr = Save(table, outPath); saveErr == nil {
+				st.Saves++
+				logf("  сохранено -> %s (%d строк)\n", outPath, table.Len())
+				sinceSave = 0
+			}
 		}
 	}
+	return st, saveErr
+}
 
-	// что уже посчитано — из памяти, если таблица не менялась
-	fr.mu.Lock()
-	d, ok := fr.done[op]
-	fr.mu.Unlock()
-	var table *batch.Table
-	if !ok || !d.mod.Equal(tmod) || other != "" {
-		var err error
-		if table, err = readOrNew(target); err != nil {
-			st.Err = err.Error()
+func logger(opt Options) func(string, ...any) {
+	if opt.Log == nil {
+		return func(string, ...any) {}
+	}
+	return opt.Log
+}
+
+// Save — запись таблицы с повторами. WriteCSVGz пишет во временный файл и переименовывает;
+// в Windows переименование не проходит, пока файл открыт на чтение (сервер как раз
+// пересчитывает анализ по нему) — это секунды, поэтому просто пробуем ещё.
+func Save(t *batch.Table, path string) error {
+	var err error
+	for try := 0; try < 10; try++ {
+		if err = t.WriteCSVGz(path); err == nil {
 			return nil
 		}
-		if other != "" {
-			o, err := batch.ReadCSVGz(other)
-			if err != nil {
-				st.Err = fmt.Sprintf("не прочитать %s: %v", other, err)
-				return nil
-			}
-			st.Merged, st.From = table.Merge(o), filepath.Base(other)
-			fr.mu.Lock()
-			fr.merged[other] = modTime(other)
-			fr.mu.Unlock()
-		}
-		d = doneOf(table, tmod, version)
-		if st.Merged == 0 {
-			fr.remember(op, d)
-		}
+		time.Sleep(time.Second)
 	}
-	st.Rows = len(d.files)
-
-	now := fr.now()
-	opt := extract.Options{
-		Roots: roots, Filter: batch.Filter{Op: op}, Jobs: featJobs, Loc: loc, FreshFirst: true, MinAge: featMinAge,
-		Stale: d.stale,
-		Skip: func(p string) bool {
-			fr.mu.Lock()
-			defer fr.mu.Unlock()
-			t, bad := fr.failed[p]
-			return bad && now.Sub(t) < featRetryErr
-		},
-	}
-	todo, ps, err := extract.Plan(d.files, opt)
-	if err != nil {
-		st.Err = fmt.Sprintf("папка с .shp недоступна: %v", err)
-		return nil
-	}
-	st.Todo, st.Young, st.Stale = ps.Todo, ps.Young, ps.Stale
-	if len(todo) == 0 && st.Merged == 0 {
-		return nil
-	}
-	if st.Merged == 0 {
-		table = nil // таблицу прочитаем, когда дойдёт очередь: держать в памяти все сразу незачем
-	}
-	return &featJob{name: name, op: op, version: version, target: target, opt: opt, todo: todo, fresh: ps.Fresh, table: table, st: st}
-}
-
-// apply — посчитать files и дописать таблицу операции.
-func (fr *featRunner) apply(j *featJob, files []string, phase string) {
-	if len(files) == 0 || j.st.Err != "" {
-		return
-	}
-	if j.table == nil {
-		t, err := readOrNew(j.target)
-		if err != nil {
-			j.st.Err = err.Error()
-			return
-		}
-		j.table = t
-	}
-	opt := j.opt
-	label := fmt.Sprintf("%s · %s, %s", j.name, j.op, phase)
-	opt.Progress = func(done, total int) { fr.setDoing(fmt.Sprintf("%s: %d из %d", label, done, total)) }
-	fr.setDoing(fmt.Sprintf("%s: 0 из %d", label, len(files)))
-	if fr.onApply != nil {
-		fr.onApply(j.op, phase, len(files))
-	}
-	as, err := extract.Apply(j.table, j.target, files, extract.Stats{}, opt)
-	j.taken += len(files)
-	if err != nil {
-		j.st.Err = fmt.Sprintf("не записать %s: %v", j.target, err)
-		fr.forget(j.op) // таблица на диске могла остаться старой — в следующий раз перечитаем
-		j.table = nil
-		return
-	}
-	if as.Saves == 0 && j.st.Merged > 0 { // всё с ошибками, а перенос был — сохранить перенесённое
-		if err := extract.Save(j.table, j.target); err != nil {
-			j.st.Err = fmt.Sprintf("не записать %s: %v", j.target, err)
-			fr.forget(j.op)
-			j.table = nil
-			return
-		}
-	}
-	j.st.Added += as.Added
-	j.st.Redone += as.Redone
-	j.st.Damaged += as.Damaged
-	j.st.Rows = j.table.Len()
-	now := fr.now()
-	fr.mu.Lock()
-	for _, e := range as.Errors {
-		fr.failed[e.Path] = now
-	}
-	fr.mu.Unlock()
-	for _, e := range as.Errors {
-		if len(j.st.Errors) < 5 {
-			j.st.Errors = append(j.st.Errors, firstLine(e.Err.Error()))
-		}
-	}
-	fr.remember(j.op, doneOf(j.table, modTime(j.target), j.version))
-	j.table = nil // следующую фазу — с диска: все таблицы сразу в памяти не держим
-}
-
-func (fr *featRunner) remember(op string, d featDone) {
-	fr.mu.Lock()
-	fr.done[op] = d
-	fr.mu.Unlock()
-}
-
-func (fr *featRunner) forget(op string) {
-	fr.mu.Lock()
-	delete(fr.done, op)
-	fr.mu.Unlock()
-}
-
-// readOrNew — таблица с диска или пустая, если её ещё нет. Старую (шаг 10 мс) сервер
-// не переименовывает и не пересчитывает сам — это решает человек утилитой extract.
-func readOrNew(path string) (*batch.Table, error) {
-	t, err := batch.ReadCSVGz(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return batch.NewTable(), nil
-	case errors.Is(err, batch.ErrOldStep):
-		return nil, fmt.Errorf("%s — старая таблица (шаг 10 мс): пересчитайте утилитой extract, она отложит старый файл", filepath.Base(path))
-	case err != nil:
-		return nil, err
-	}
-	return t, nil
-}
-
-func modTime(p string) time.Time {
-	if st, err := os.Stat(p); err == nil {
-		return st.ModTime()
-	}
-	return time.Time{}
-}
-
-func samePath(a, b string) bool { return strings.EqualFold(filepath.Clean(a), filepath.Clean(b)) }
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
-}
-
-// adminFeatRun — кнопка «Посчитать сейчас» (только с этого компьютера). Если проход уже идёт —
-// говорим об этом, а не молчим: второй параллельно не запускается.
-func (s *Server) adminFeatRun(w http.ResponseWriter, r *http.Request) {
-	if s.feat.Status().Running {
-		http.Redirect(w, r, "/admin?saved=feat-busy#features", http.StatusSeeOther)
-		return
-	}
-	go s.feat.Run()
-	http.Redirect(w, r, "/admin?saved=feat-run#features", http.StatusSeeOther)
-}
-
-// StartFeatures — включить подсчёт признаков по расписанию (из main, если есть настройки).
-func (s *Server) StartFeatures(every time.Duration) {
-	if s.feat != nil {
-		s.feat.Start(every)
-	}
+	return err
 }
