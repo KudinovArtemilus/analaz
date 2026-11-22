@@ -80,10 +80,55 @@ func TestKpsUnitsDescribed(t *testing.T) {
 			}
 		}
 	}
-	if len(KpsUnits()) != 13+3+3+2 { // 13 осей, 3 привода с клапанами (MRD, SRD Л/П), 3 насоса, аккумулятор, ПЛК
+	if len(KpsUnits()) != 13+5+3+2 { // 13 осей, 5 приводов (MRD, SRD Л/П по клапанам; WRD Л/П по моменту), 3 насоса, аккумулятор, ПЛК
 		t.Errorf("узлов КПС %d", len(KpsUnits()))
 	}
 	if Subsystem("kps_step13_s") != "КПС: шаги программы" || !strings.Contains(Human("kps_step13_s"), "шага программы 13") {
 		t.Errorf("шаги: %q %q", Subsystem("kps_step13_s"), Human("kps_step13_s"))
+	}
+}
+
+// Усилие оси — показатель «внутри колеса»: на одном колесе рост усилия — «проблема»,
+// при смене колеса (смешанные данные) он не оценивается, хоть усилие и выросло.
+func TestPerRegimeIndicators(t *testing.T) {
+	n := 100
+	force, dv, dw := make([]float64, n), make([]float64, n), make([]float64, n)
+	for i := range force {
+		force[i], dv[i], dw[i] = 800+float64(i%5), 860, 895
+		if i >= 80 {
+			force[i] = 1200 + float64(i%5)
+		}
+	}
+	eval := func(P *Dataset) Diag {
+		B := firstRows(P, 20)
+		sig := map[string]float64{}
+		for _, c := range P.Cols {
+			_, sig[c] = RobustStats(B.Col(c), P.Col(c))
+		}
+		diag, _ := Evaluate(P, func(f string) float64 { return NanMedian(B.Col(f)) }, sig, float64(n-1), nil)
+		for _, d := range diag {
+			if d.Name == "Подача главного валка (MRF)" {
+				return d
+			}
+		}
+		return Diag{}
+	}
+	one := testSet(everyMin(n, time.Hour), col{"kps_mrf_force_max", force}, col{"kps_wheel_dv", dv}, col{"kps_wheel_dw", dw})
+	if d := eval(one); d.Status != Alarm {
+		t.Errorf("одно колесо, усилие +50%%: %+v", d)
+	}
+	dv2 := append([]float64{}, dv...)
+	for i := 80; i < n; i++ {
+		dv2[i] = 1164 // в конце — другое колесо: рост усилия от колеса
+	}
+	mixed := testSet(everyMin(n, time.Hour), col{"kps_mrf_force_max", force}, col{"kps_wheel_dv", dv2}, col{"kps_wheel_dw", dw})
+	if d := eval(mixed); d.Status != OK || len(d.Facts) != 0 {
+		t.Errorf("смешанные колёса — усилие не оценивается: %+v", d)
+	}
+	if r := Regimes(mixed); len(r) != 2 || r[0].Key != "dv860-dw895" || r[0].Cycles != 80 || r[1].Label != "колесо DV 1164 / DW 895" {
+		t.Errorf("режимы: %+v", r)
+	}
+	if b, rg := SplitOp("op3@DV860-DW895"); b != "OP3" || rg != "dv860-dw895" || JoinOp(b, rg) != "OP3@dv860-dw895" {
+		t.Errorf("SplitOp: %s %s", b, rg)
 	}
 }

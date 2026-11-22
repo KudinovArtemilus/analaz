@@ -19,6 +19,7 @@ type Options struct {
 	GapMin       float64  // пауза-останов, мин (30)
 	Source       string   // откуда таблица — пишется в сохраняемую норму
 	Note         string
+	Regime       string // режим (КПС: колесо dv860-dw895) — анализ только его циклов; "" — все вместе
 }
 
 // DefaultOptions — значения по умолчанию, как в analyze.py.
@@ -43,7 +44,8 @@ type Result struct {
 	Garbage  []Garbage // выброшено «мусорных» (индексы — в рабочих циклах ДО очистки)
 	GarbageT []time.Time
 	GarbageF []string
-	Dropped  int // признаков нет в хранимой норме
+	Dropped  int      // признаков нет в хранимой норме
+	Regimes  []Regime // режимы операции (до отбора по Opts.Regime) — для выбора колеса на странице
 
 	Anom     *Anomalies
 	Order    []int      // аномальные циклы, сильнейшие первыми
@@ -69,6 +71,13 @@ func Run(d *Dataset, o Options) (*Result, error) {
 	r := &Result{Opts: o}
 	if o.Op != "" {
 		d = d.OnlyOp(o.Op)
+	}
+	r.Regimes = Regimes(d)
+	if o.Regime != "" {
+		d = d.OnlyRegime(o.Regime)
+		if d.Len() == 0 {
+			return nil, fmt.Errorf("нет циклов %s — %s", o.Op, RegimeLabel(o.Regime))
+		}
 	}
 	if dm := d.Col("shp_damaged"); dm != nil {
 		for i, v := range dm {
@@ -98,8 +107,8 @@ func Run(d *Dataset, o Options) (*Result, error) {
 
 	// ---------- норма ----------
 	if o.Norm != nil {
-		if o.Norm.Op != "" && o.Op != "" && !strings.EqualFold(o.Norm.Op, o.Op) {
-			return nil, fmt.Errorf("норма снята для %s, а анализируется %s", o.Norm.Op, o.Op)
+		if want := JoinOp(o.Op, o.Regime); o.Norm.Op != "" && o.Op != "" && !strings.EqualFold(o.Norm.Op, want) {
+			return nil, fmt.Errorf("норма снята для %s, а анализируется %s", o.Norm.Op, want)
 		}
 		r.Norm, r.Stored = o.Norm, true
 		r.Cols, r.Dropped = o.Norm.Restrict(r.Cols)
@@ -122,7 +131,7 @@ func Run(d *Dataset, o Options) (*Result, error) {
 		}
 		r.Base = base
 		r.Norm = BuildNormSet(d, r.Prod, base, r.Cols)
-		r.Norm.Op, r.Norm.Source, r.Norm.Note = strings.ToUpper(o.Op), o.Source, o.Note
+		r.Norm.Op, r.Norm.Source, r.Norm.Note = JoinOp(o.Op, o.Regime), o.Source, o.Note
 		now := time.Now()
 		r.Norm.Created = LocalTime{time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), 0, time.UTC)}
 		r.Sensors = SensorHealth(d, r.Prod, base)

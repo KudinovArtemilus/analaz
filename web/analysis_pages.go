@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -61,6 +62,54 @@ type stopView struct {
 	Before       []reasonJSON // Value — медиана 50 циклов до останова, Rm — норма
 }
 
+// regimeView — колесо для выбора на странице и его норма.
+type regimeView struct {
+	Op, Label  string
+	Cycles     int
+	From, To   string
+	On         bool
+	Norm       string // «сохранена …» или «пока нет …»
+	NormStored bool
+}
+
+func (s *Server) regimeViews(base, cur string, regs []analyze.Regime) []regimeView {
+	var out []regimeView
+	for _, rg := range regs {
+		v := regimeView{Op: analyze.JoinOp(base, rg.Key), Label: rg.Label, Cycles: rg.Cycles,
+			From: rg.From.Format("02.01 15:04"), To: rg.To.Format("02.01 15:04"), On: rg.Key == cur}
+		if ns, err := analyze.LoadNorm(s.an.normPath(v.Op)); err == nil {
+			v.NormStored = true
+			v.Norm = fmt.Sprintf("норма сохранена: %s — %s, %d циклов", ns.BaseFrom.Format("02.01 15:04"), ns.BaseTo.Format("02.01 15:04"), ns.BaseCycles)
+			if ns.Note != "" {
+				v.Norm += " · " + ns.Note
+			}
+		} else if rg.Cycles >= analyze.AutoNormCycles {
+			v.Norm = fmt.Sprintf("норма сохраняется (циклов %d ≥ %d) — обновите страницу через минуту", rg.Cycles, analyze.AutoNormCycles)
+		} else {
+			v.Norm = fmt.Sprintf("нормы пока нет: сохранится сама, когда будет %d рабочих циклов (сейчас %d); до тех пор — первые 20%% циклов этого колеса",
+				analyze.AutoNormCycles, rg.Cycles)
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// ensureWheelNorms — у колёс, где циклов уже хватает, а нормы ещё нет, — посчитать анализ
+// колеса в фоне: при этом сохраняется его норма (analysisStore.autoNorm). Так норма появляется,
+// даже если страницу этого колеса никто не открывал.
+func (s *Server) ensureWheelNorms(base string, regs []analyze.Regime) {
+	for _, rg := range regs {
+		op := analyze.JoinOp(base, rg.Key)
+		if rg.Cycles < analyze.AutoNormCycles {
+			continue
+		}
+		if _, err := os.Stat(s.an.normPath(op)); err == nil {
+			continue
+		}
+		go s.an.get(op) //nolint:errcheck — ошибки пишет autoNorm в журнал; одновременный второй расчёт get не запустит
+	}
+}
+
 type trendView struct {
 	trendJSON
 	Up bool
@@ -84,26 +133,47 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ops)
 	data["Ops"] = ops
-	op := strings.ToUpper(r.URL.Query().Get("op"))
+	op := r.URL.Query().Get("op")
 	if op == "" && len(ops) > 0 {
 		op = ops[0]
 	}
-	data["Op"] = op
-	// чья операция: название машины в шапке; у машин, для которых узлы ещё не описаны
-	// (всё, кроме пресса 10), — пометка, что пустой светофор не значит «в норме»
-	if s.cfg != nil {
-		if p := s.cfg.Get().ProfileFor(op); p != nil {
-			data["Machine"] = p.Name
-			data["NoUnits"] = p.Kind != "" && p.Kind != "press10" && p.Kind != "kps"
-			data["CommonNorm"] = p.Kind == "kps" // узлы есть, но норма пока общая для всех колёс (до К4)
-		}
-	}
-	if op == "" {
+	if op != "" && !reOp.MatchString(op) {
+		data["Op"] = op
+		data["Error"] = "операция " + op + ": ждали OP1, OP2…"
 		s.render(w, "analysis.html", data)
 		return
 	}
-	if !reOp.MatchString(op) {
-		data["Error"] = "операция " + op + ": ждали OP1, OP2…"
+	base, regime := analyze.SplitOp(op)
+	data["BaseOp"] = base
+	// колёса (КПС): по умолчанию — то, что катают сейчас, со своей нормой; «@all» — все вместе
+	if base != "" {
+		if mixed, err := s.an.get(base); err == nil && len(mixed.Regimes) > 0 {
+			if regime == "" {
+				cur := mixed.Regimes[0]
+				for _, rg := range mixed.Regimes {
+					if rg.To.After(cur.To) {
+						cur = rg
+					}
+				}
+				regime = cur.Key
+			}
+			data["Regimes"] = s.regimeViews(base, regime, mixed.Regimes)
+			data["AllOp"], data["AllOn"] = base+"@all", regime == "all"
+			s.ensureWheelNorms(base, mixed.Regimes)
+		}
+	}
+	op = analyze.JoinOp(base, regime)
+	data["Op"] = op
+	// чья операция: название машины в шапке; у машин, для которых узлы ещё не описаны
+	// (всё, кроме пресса 10 и КПС), — пометка, что пустой светофор не значит «в норме»
+	if s.cfg != nil {
+		if p := s.cfg.Get().ProfileFor(base); p != nil {
+			data["Machine"] = p.Name
+			data["NoUnits"] = p.Kind != "" && p.Kind != "press10" && p.Kind != "kps"
+			data["CommonNorm"] = p.Kind == "kps" && regime == "all" // все колёса вместе — норма общая
+		}
+	}
+	if op == "" {
 		s.render(w, "analysis.html", data)
 		return
 	}
@@ -114,10 +184,16 @@ func (s *Server) analysisPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.an.mu.Lock()
-	at := s.an.cache[op].at
+	at := s.an.cache[opKey(op)].at
 	s.an.mu.Unlock()
 
-	sum := summarize(op, res, at, s.human)
+	sum := summarize(base, res, at, s.human) // в шапке — операция; колесо — отдельно (RegimeLabel)
+	switch {
+	case regime == "all":
+		data["RegimeLabel"] = "все колёса"
+	case regime != "":
+		data["RegimeLabel"] = analyze.RegimeLabel(regime)
+	}
 	var bad, ok []unitView
 	for _, u := range sum.Units {
 		v := unitView{unitJSON: u}

@@ -17,8 +17,8 @@
         <span class="brand">press-go</span>
         <nav class="nav"><a href="/">Циклы</a><a href="/analysis" class="on">Анализ</a><a href="/piece">Заготовка</a><a
                 href="/admin">Настройки</a></nav>
-        {{if .Ops}}<nav class="tabs">{{$op := .Op}}{{range .Ops}}<a href="/analysis?op={{.}}" {{if eq . $op}} class="on"
-                {{end}}>{{.}}</a>{{end}}</nav>{{end}}
+        {{if .Ops}}<nav class="tabs">{{$base := .BaseOp}}{{range .Ops}}<a href="/analysis?op={{.}}" {{if eq . $base}}
+                class="on" {{end}}>{{.}}</a>{{end}}</nav>{{end}}
     </header>
 
     <main class="page">
@@ -35,11 +35,18 @@
             <div class="muted">В папке нет таблиц features*_OP1.csv.gz — запустите run.py (extract)</div>
         </div>
         {{else}}
-        {{$op := .Op}}{{$machine := .Machine}}{{$noUnits := .NoUnits}}{{$commonNorm := .CommonNorm}}{{with .S}}
+        {{with .Regimes}}<nav class="tabs regimes small" title="анализ внутри одного колеса — со своей нормой">колесо:
+            {{range .}}<a href="/analysis?op={{.Op}}" {{if .On}} class="on" {{end}} title="{{.Norm}}">{{.Label}} <span
+                    class="muted">· {{.Cycles}} цикл.{{if .NormStored}} · норма ✓{{end}}</span></a>{{end}}
+            <a href="/analysis?op={{$.AllOp}}" {{if $.AllOn}} class="on" {{end}}>все колёса вместе</a>
+        </nav>{{end}}
+        {{$op := .Op}}{{$machine := .Machine}}{{$noUnits := .NoUnits}}{{$commonNorm := .CommonNorm}}{{$regimes :=
+        .Regimes}}{{$regLabel := .RegimeLabel}}{{with .S}}
         <!-- Шапка: что анализируем и по какой норме. Без этого цифры нельзя правильно понять. -->
         <section class="an-head">
             <div>
-                <div class="an-title">{{if $machine}}{{$machine}}{{else}}Пресс{{end}} {{.Op}} · {{.Period}}</div>
+                <div class="an-title">{{if $machine}}{{$machine}}{{else}}Пресс{{end}} {{.Op}}{{with $regLabel}} ·
+                    {{.}}{{end}} · {{.Period}}</div>
                 <div class="muted small">{{.File}} · циклов {{.Cycles}}, рабочих {{.Prod}} · посчитано {{.Computed}}
                 </div>
             </div>
@@ -53,10 +60,12 @@
             пустые, и «0 в норме» не значит «всё хорошо». Уже работают: аномалии, тренды, остановы, датчики и карта
             здоровья — пока по сырым признакам каналов (min/mean/max/std). Узлы и признаки с физическим смыслом —
             следующий шаг (К2–К3).</div>{{end}}
-        {{if $commonNorm}}<div class="note small"><b>Норма пока общая для всех колёс.</b> В светофоре — только то, что
-            от колеса почти не зависит: клапаны осей и приводов, регуляторы насосов, аккумулятор, ПЛК. Усилия, давления
-            и обороты зависят от колеса (DV/DW) и войдут в светофор вместе с нормами по колесу; до тех пор их отклонения
-            после смены колеса — скорее от колеса, а не от износа.</div>{{end}}
+        {{if $commonNorm}}<div class="note small"><b>Все колёса вместе — норма общая.</b> В светофоре только то, что от
+            колеса почти не зависит: клапаны осей и приводов, регуляторы насосов, аккумулятор, ПЛК. Усилия, давления и
+            момент зависят от колеса (DV/DW) и оцениваются только при выборе одного колеса — вверху, «колесо:».</div>
+        {{end}}
+        {{range $regimes}}{{if .On}}<div class="muted small">{{.Label}}: {{.From}} — {{.To}} · {{.Norm}}</div>
+        {{end}}{{end}}
         {{if .ShortData}}<div class="note small">Данных меньше недели — прогнозы и тренды предварительные. Сравнение
             одинаковых узлов между собой надёжно уже сейчас.</div>{{end}}
 
@@ -132,7 +141,8 @@
                 <b>установка</b> штампа. Штампы разные (своя геометрия и нагрузка), и общая норма это смазывает: усилие,
                 обычное для одного штампа, для другого — отклонение. Поэтому у каждой установки — её показатели против
                 общей нормы и <b>дрейф</b>: конец работы штампа против его же начала (его собственная норма; так видно
-                износ штампа). Дрейф считается, когда циклов ≥ 30.</p>
+                износ штампа). Дрейф считается, когда циклов ≥ 30.
+            </p>
             <table class="tbl small">
                 <tr>
                     <th>замена штампа</th>
@@ -145,7 +155,8 @@
                 {{range .}}<tr>
                     <td class="nowrap"><b>{{.Change}}</b></td>
                     <td class="nowrap{{if .OtherRecipe}} st-warn{{end}}">{{.Recipe}}{{if .OtherRecipe}}
-                        <b>другой</b>{{end}}</td>
+                        <b>другой</b>{{end}}
+                    </td>
                     <td class="nowrap">{{.From}} — {{.To}}</td>
                     <td>{{.Cycles}}</td>
                     <td>{{v .Strokes}}</td>

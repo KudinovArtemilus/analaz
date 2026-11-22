@@ -75,11 +75,15 @@ func Evaluate(P *Dataset, normMed func(string) float64, sig map[string]float64, 
 
 	var out []Diag
 	var notes []string
+	mixed := mixedRegimes(P) // несколько колёс — показатели «внутри колеса» не оцениваем
 	for _, u := range Units() {
 		status, have := OK, false
 		var facts []fact
 		var forecast []string
 		for _, in := range u.Ind {
+			if in.PerRegime && mixed {
+				continue
+			}
 			x := P.Col(in.Feat)
 			if x == nil || notna(x) < 5 {
 				continue

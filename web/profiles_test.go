@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KudinovArtemilus/press-go/internal/analyze"
 	"github.com/KudinovArtemilus/press-go/internal/batch"
 	"github.com/KudinovArtemilus/press-go/internal/config"
 	"github.com/KudinovArtemilus/press-go/internal/extract"
@@ -84,12 +85,12 @@ func TestTwoProfiles(t *testing.T) {
 
 	// --- анализ: вкладка OP3, название машины, пометка про узлы ---
 	body := do(h, "GET", "/analysis?op=OP3", nil, false, nil).Body.String()
-	for _, want := range []string{`href="/analysis?op=OP1"`, `href="/analysis?op=OP3"`, "КПС OP3", "Норма пока общая для всех колёс"} {
+	for _, want := range []string{`href="/analysis?op=OP1"`, `href="/analysis?op=OP3"`, "КПС OP3"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("анализ OP3: нет %q", want)
 		}
 	}
-	if b := do(h, "GET", "/analysis?op=OP1", nil, false, nil).Body.String(); strings.Contains(b, "Узлы этой машины ещё не описаны") || strings.Contains(b, "Норма пока общая") {
+	if b := do(h, "GET", "/analysis?op=OP1", nil, false, nil).Body.String(); strings.Contains(b, "Узлы этой машины ещё не описаны") || strings.Contains(b, "норма общая") {
 		t.Error("у пресса пометки КПС")
 	}
 	if strings.Contains(body, "Узлы этой машины ещё не описаны") {
@@ -356,4 +357,113 @@ func TestFeaturesRecomputeOldVersion(t *testing.T) {
 	if b := do(s.Handler(), "GET", "/admin", nil, true, nil).Body.String(); strings.Contains(b, "пересчёт по новой версии") {
 		t.Error("пересчёт закончен, а «Настройки» ещё его показывают")
 	}
+}
+
+// К4: два колеса КПС. По умолчанию — текущее колесо со своей нормой; норма колеса сохраняется
+// сама, когда набралось AutoNormCycles циклов, и дальше не меняется; чужой файл нормы не трогается.
+func TestKpsWheelNorms(t *testing.T) {
+	old := analyze.AutoNormCycles
+	analyze.AutoNormCycles = 8
+	defer func() { analyze.AutoNormCycles = old }()
+
+	kps, feat := t.TempDir(), t.TempDir()
+	// колесо 860/895 — 12 циклов, потом 1164/1253 — 5 циклов (меньше порога нормы)
+	for i := range 17 {
+		dv, dw := 860.0, 895.0
+		if i >= 12 {
+			dv, dw = 1164, 1253
+		}
+		writeKps(t, kps, i, dv, dw)
+	}
+	st, _ := config.Open(filepath.Join(t.TempDir(), "pressgo.json"), config.Default())
+	st.Update(func(c *config.Config) error {
+		c.FeaturesDir = feat
+		c.Active().Enabled = false
+		c.Profiles = append(c.Profiles, config.Profile{ID: "kps", Name: "КПС", Kind: "kps", Sources: []string{kps}, Ops: []string{"OP3"}, Enabled: true})
+		return nil
+	})
+	s, _ := New(kps, time.UTC)
+	s.UseConfig(st)
+	s.feat.Run()
+	h := s.Handler()
+
+	// по умолчанию — колесо, которое катают сейчас (последний цикл): 1164/1253
+	b := page(h, "/analysis?op=OP3")
+	for _, want := range []string{"колесо DV 1164 / DW 1253", "колесо DV 860 / DW 895", "все колёса вместе",
+		`href="/analysis?op=OP3%40dv1164-dw1253" class="on"`, "КПС OP3 · колесо DV 1164 / DW 1253", "нормы пока нет"} {
+		if !strings.Contains(b, want) {
+			i := strings.Index(b, "an-title")
+			t.Errorf("страница OP3: нет %q\n%s", want, b[max(0, i):min(len(b), i+700)])
+		}
+	}
+	// колесо 860: циклов ≥ порога — норма сохраняется сама (в фоне, страницу колеса никто не открывал)
+	np := filepath.Join(feat, "norm_OP3@dv860-dw895.json")
+	for k := 0; k < 100 && modTime(np).IsZero(); k++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	b = page(h, "/analysis?op=OP3@dv860-dw895")
+	ns, err := analyze.LoadNorm(np)
+	if err != nil || ns.BaseCycles != 8 || ns.Op != "OP3@dv860-dw895" || !strings.Contains(ns.Note, "авто") {
+		t.Fatalf("автонорма: %v %+v", err, ns)
+	}
+	if !strings.Contains(b, "Норма: хранимая") {
+		t.Error("колесо 860: страница не по хранимой норме")
+	}
+	// у колеса 1164 (5 циклов) нормы нет; у «всех вместе» — норма общая, пометка есть
+	if _, err := os.Stat(filepath.Join(feat, "norm_OP3@dv1164-dw1253.json")); err == nil {
+		t.Error("норма колеса 1164 сохранена раньше порога")
+	}
+	if b := page(h, "/analysis?op=OP3@all"); !strings.Contains(b, "норма общая") || !strings.Contains(b, "КПС OP3 · все колёса ·") {
+		i := strings.Index(b, "an-title")
+		t.Errorf("«все колёса вместе»: нет пометки про общую норму\n%s", b[max(0, i):min(len(b), i+900)])
+	}
+	// норма не ползёт: пришли ещё циклы колеса 860 — файл тот же
+	m0 := modTime(np)
+	for i := 17; i < 20; i++ {
+		writeKps(t, kps, i, 860, 895)
+	}
+	s.feat.Run()
+	do(h, "GET", "/analysis?op=OP3@dv860-dw895", nil, false, nil)
+	if !modTime(np).Equal(m0) {
+		t.Error("норма колеса перезаписана после новых циклов")
+	}
+	// API тоже понимает колесо
+	if rec := do(h, "GET", "/api/analysis/OP3@dv860-dw895/health", nil, false, nil); rec.Code != http.StatusOK {
+		t.Errorf("API по колесу: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// page — HTML страницы, пробелы и переносы схлопнуты, как их показывает браузер: тогда тест
+// не зависит от того, как редактор отформатировал шаблон (переносы внутри заголовка, атрибутов).
+func page(h http.Handler, url string) string {
+	b := do(h, "GET", url, nil, false, nil).Body.String()
+	return strings.Join(strings.Fields(b), " ")
+}
+
+// writeKps — синтетический цикл КПС с заданным колесом (DV/DW) и признаками осей.
+func writeKps(t *testing.T, buf string, i int, dv, dw float64) {
+	t.Helper()
+	tm := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC).Add(time.Duration(i) * 10 * time.Minute)
+	name := fmt.Sprintf("26.%06d.067665_OP3_%s.shp", 170000+i, tm.Format("20060102_150405"))
+	p := filepath.Join(buf, "2026", "11", "13", name)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	names := []string{"Vorformdurchmesser DV", "Fertigformdurchmesser DW", "MRF_Force_F", "MRF_Prop_Y1.1_U", "MRF_Prop_Y1.1_FU"}
+	fn := func(ch int, t float64) float64 {
+		switch ch {
+		case 0:
+			return dv
+		case 1:
+			return dw
+		case 2:
+			return dv * (1 + 0.01*float64(i%3)) * math.Exp(-(t-5)*(t-5))
+		case 3:
+			return math.Sin(t * 3)
+		}
+		return math.Sin(t*3-0.1) * (1 + 0.01*float64(i%4))
+	}
+	if err := os.WriteFile(p, shp.SyntheticSignals([]string{"Y1", "Y2", "Y3", "Y4", "Y5", "Y6", "Y7", "Y8"}, names, fn, 10, 20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(p, old, old)
 }

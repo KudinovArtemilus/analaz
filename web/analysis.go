@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"os"
@@ -53,7 +54,7 @@ type analysisEntry struct {
 
 var (
 	reTableOp = regexp.MustCompile(`(?i)^features.*_(OP\d+)\.csv\.gz$`)
-	reOp      = regexp.MustCompile(`(?i)^OP\d+$`)
+	reOp      = regexp.MustCompile(`(?i)^OP\d+(@(dv\d+-dw\d+|all))?$`) // OP3@dv860-dw895 — одно колесо КПС
 )
 
 // tables — по каждой операции самая свежая таблица в папке.
@@ -85,6 +86,7 @@ func (a *analysisStore) tables() (map[string]string, error) {
 	return out, nil
 }
 
+// normPath — файл хранимой нормы: norm_OP1.json; у колеса КПС — norm_OP3@dv860-dw895.json.
 func (a *analysisStore) normPath(op string) string {
 	feats, norms := a.dirs()
 	if norms == "" {
@@ -93,20 +95,30 @@ func (a *analysisStore) normPath(op string) string {
 	if norms == "" {
 		return ""
 	}
-	return filepath.Join(norms, "norm_"+op+".json")
+	return filepath.Join(norms, "norm_"+analyze.JoinOp(analyze.SplitOp(op))+".json")
+}
+
+// opKey — имя операции для кэша и файлов: OP3, OP3@dv860-dw895; «@all» — то же, что без колеса.
+func opKey(op string) string {
+	base, regime := analyze.SplitOp(op)
+	if regime == "all" {
+		regime = ""
+	}
+	return analyze.JoinOp(base, regime)
 }
 
 // get — результат для операции: из памяти, если таблица и норма не менялись, иначе пересчёт.
 func (a *analysisStore) get(op string) (*analyze.Result, error) {
-	op = strings.ToUpper(op)
+	op = opKey(op)
+	base, _ := analyze.SplitOp(op)
 	tabs, err := a.tables()
 	if err != nil {
 		return nil, err
 	}
-	path, ok := tabs[op]
+	path, ok := tabs[base]
 	if !ok {
 		dir, _ := a.dirs()
-		return nil, fmt.Errorf("нет таблицы признаков для %s в %s", op, dir)
+		return nil, fmt.Errorf("нет таблицы признаков для %s в %s", base, dir)
 	}
 	st, err := os.Stat(path)
 	if err != nil {
@@ -141,7 +153,8 @@ func (a *analysisStore) compute(op string, e *analysisEntry) {
 		}
 	}()
 	opts := analyze.DefaultOptions()
-	opts.Op, opts.Source = op, e.path
+	opts.Op, opts.Regime = analyze.SplitOp(op)
+	opts.Source = e.path
 	if !e.normMod.IsZero() {
 		ns, err := analyze.LoadNorm(a.normPath(op))
 		if err != nil {
@@ -162,6 +175,47 @@ func (a *analysisStore) compute(op string, e *analysisEntry) {
 	}
 	e.res, e.err = analyze.Run(d, opts)
 	e.at = time.Now()
+	if e.err == nil && opts.Regime != "" && opts.Norm == nil {
+		a.autoNorm(op, d, opts, e)
+	}
+}
+
+// autoNorm — у колеса набралось AutoNormCycles рабочих циклов, а нормы ещё нет: сохранить его норму
+// по первым AutoNormCycles циклам и пересчитать по ней. Дальше норма не ползёт: файл не меняется,
+// пока его не заменит человек (утилитой analyze --save-norm). Существующий файл не перезаписывается.
+func (a *analysisStore) autoNorm(op string, d *analyze.Dataset, opts analyze.Options, e *analysisEntry) {
+	p := e.res.Prod
+	path := a.normPath(op)
+	if p.Len() < analyze.AutoNormCycles || path == "" {
+		return
+	}
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	o := opts
+	o.BaseFrom, o.BaseTo = p.Times[0], p.Times[analyze.AutoNormCycles-1]
+	o.Note = fmt.Sprintf("авто: первые %d рабочих циклов (%s)", analyze.AutoNormCycles, analyze.RegimeLabel(opts.Regime))
+	nr, err := analyze.Run(d, o)
+	if err != nil {
+		log.Printf("норма %s: %v", op, err)
+		return
+	}
+	if err := nr.Norm.Save(path); err != nil {
+		log.Printf("норма %s: не записать %s: %v", op, path, err)
+		return
+	}
+	log.Printf("норма %s сохранена: %s, %s — %s, %d циклов", op, filepath.Base(path),
+		nr.Norm.BaseFrom.Format("02.01 15:04"), nr.Norm.BaseTo.Format("02.01 15:04"), nr.Norm.BaseCycles)
+	o = opts
+	o.Norm = nr.Norm
+	if res, err := analyze.Run(d, o); err == nil {
+		e.res = res
+	}
+	if st, err := os.Stat(path); err == nil {
+		a.mu.Lock()
+		e.normMod = st.ModTime() // чтобы get не пересчитывал ещё раз из-за нового файла
+		a.mu.Unlock()
+	}
 }
 
 // ---------- JSON ----------
@@ -368,7 +422,7 @@ func (s *Server) result(w http.ResponseWriter, r *http.Request) (*analyze.Result
 		return nil, time.Time{}, false
 	}
 	s.an.mu.Lock()
-	at := s.an.cache[strings.ToUpper(op)].at
+	at := s.an.cache[opKey(op)].at
 	s.an.mu.Unlock()
 	return res, at, true
 }

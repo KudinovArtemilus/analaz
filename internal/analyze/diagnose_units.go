@@ -33,6 +33,9 @@ type Indicator struct {
 	AbsWarn     float64 // абсолютный порог (NaN — нет)
 	AbsAlarm    float64
 	Unit        string
+	// PerRegime — показатель сравним только внутри одного режима (КПС: колеса): усилия, давления.
+	// На смешанных данных (несколько колёс) диагноз его пропускает — смена колеса не «поломка».
+	PerRegime bool
 }
 
 // Unit — узел пресса: насос, регулятор, клапан, зажим штампа…
@@ -51,11 +54,18 @@ type Unit struct {
 }
 
 func ind(feat, label, bad string, warn, alarm float64, unit string) Indicator {
-	return Indicator{feat, label, bad, warn, alarm, none, none, unit}
+	return Indicator{Feat: feat, Label: label, Bad: bad, WarnRel: warn, AlarmRel: alarm, AbsWarn: none, AbsAlarm: none, Unit: unit}
 }
 
 func indAbs(feat, label, bad string, warn, alarm, absWarn, absAlarm float64, unit string) Indicator {
-	return Indicator{feat, label, bad, warn, alarm, absWarn, absAlarm, unit}
+	return Indicator{Feat: feat, Label: label, Bad: bad, WarnRel: warn, AlarmRel: alarm, AbsWarn: absWarn, AbsAlarm: absAlarm, Unit: unit}
+}
+
+// indRegime — показатель, сравнимый только внутри одного режима (колеса).
+func indRegime(feat, label, bad string, warn, alarm float64, unit string) Indicator {
+	in := ind(feat, label, bad, warn, alarm, unit)
+	in.PerRegime = true
+	return in
 }
 
 // Units — все узлы с показателями, причинами и что проверить (build_units() в diagnose.py).
