@@ -38,6 +38,8 @@ type featRunner struct {
 	merged  map[string]time.Time          // чужая таблица → её время, когда переносили (второй раз ту же не читаем)
 	now     func() time.Time              // для тестов
 	perPass int                           // featPerPass; меньше — только в тестах
+	budget  time.Duration                 // featBudget; в тестах — своё
+	more    bool                          // последний проход не успел всё — следующий скоро
 	onApply func(op, phase string, n int) // для тестов: вызывается перед подсчётом
 }
 
@@ -59,6 +61,16 @@ const (
 	featJobs     = 2               // файлов одновременно: буфер — сетевая папка, больше не быстрее
 	featMinAge   = 2 * time.Minute // моложе — регистратор, возможно, ещё пишет
 	featRetryErr = time.Hour       // файл с ошибкой пробуем снова не раньше
+
+	// Проход ограничен по времени, а не только числом файлов: с сетевой папки файлы читаются
+	// не быстрее netio (2 МБ/с), и 500 файлов КПС по 4 МБ — это 17 минут, всё это время другие
+	// машины ждали, а таблица не сохранялась. Теперь: сначала каждой машине — по featFair новых,
+	// потом новые и история порциями по featChunk (после каждой — запись таблицы), пока не
+	// вышло featBudget. Не успели — следующий проход через featBusyEvery, а не через 5 минут.
+	featBudget    = 4 * time.Minute
+	featFair      = 10
+	featChunk     = 25
+	featBusyEvery = 30 * time.Second
 )
 
 // featStatus — итог последнего законченного прохода и, если идёт, текущий (для «Настроек»).
@@ -94,7 +106,7 @@ type featOpStatus struct {
 }
 
 func newFeatRunner(s *Server) *featRunner {
-	return &featRunner{s: s, done: map[string]featDone{}, failed: map[string]time.Time{}, merged: map[string]time.Time{}, now: time.Now, perPass: featPerPass}
+	return &featRunner{s: s, done: map[string]featDone{}, failed: map[string]time.Time{}, merged: map[string]time.Time{}, now: time.Now, perPass: featPerPass, budget: featBudget}
 }
 
 // Status — копия статуса: последний законченный проход плюс что делается сейчас.
@@ -123,7 +135,14 @@ func (fr *featRunner) Start(every time.Duration) {
 	go func() {
 		for {
 			fr.Run()
-			time.Sleep(every)
+			fr.mu.Lock()
+			more := fr.more
+			fr.mu.Unlock()
+			if more {
+				time.Sleep(featBusyEvery) // не успели всё — не ждать 5 минут
+			} else {
+				time.Sleep(every)
+			}
 		}
 	}()
 }
@@ -207,14 +226,25 @@ func (fr *featRunner) Run() bool {
 			}
 		}
 	}
-	// --- фаза 1: новые файлы всех машин; фаза 2: история, в остаток лимита ---
+	// --- фаза 0: каждой машине — немного новых (медленная сеть одной не задержит другие);
+	// фаза 1: остальные новые; фаза 2: история — порциями, пока не вышло время прохода ---
+	deadline := fr.now().Add(fr.budget)
 	for _, j := range jobs {
-		fr.apply(j, j.todo[:min(j.fresh, fr.perPass)], "новые")
+		fr.apply(j, j.todo[:min(j.fresh, featFair, fr.perPass)], "новые")
+	}
+	chunks := func(j *featJob, end int, phase string) {
+		for j.taken < end && j.st.Err == "" && fr.now().Before(deadline) {
+			k := min(end, j.taken+featChunk)
+			fr.apply(j, j.todo[j.taken:k], phase)
+		}
 	}
 	for _, j := range jobs {
-		rest := j.todo[j.taken:]
-		fr.apply(j, rest[:min(len(rest), fr.perPass-j.taken)], "история")
+		chunks(j, min(j.fresh, fr.perPass), "новые")
 	}
+	for _, j := range jobs {
+		chunks(j, min(len(j.todo), fr.perPass), "история")
+	}
+	more := false
 	for _, j := range jobs {
 		if j.table != nil && j.st.Err == "" { // перенесли строки, а файлов не было — всё равно сохранить
 			if err := extract.Save(j.table, j.target); err != nil {
@@ -227,8 +257,14 @@ func (fr *featRunner) Run() bool {
 		}
 		j.st.Todo = len(j.todo) - j.taken
 		j.st.Stale = max(j.st.Stale-j.st.Redone, 0)
+		if j.st.Todo > 0 && j.st.Err == "" {
+			more = true
+		}
 		fr.logOp(*j.st)
 	}
+	fr.mu.Lock()
+	fr.more = more
+	fr.mu.Unlock()
 	return true
 }
 
