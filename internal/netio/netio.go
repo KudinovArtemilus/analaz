@@ -24,15 +24,16 @@ const chunk = 64 << 10 // читаем кусками по 64 КБ: трафик
 
 var (
 	mu     sync.Mutex
-	rateFn = func() float64 { return DefaultMBps }
+	rateFn = func(string) float64 { return DefaultMBps }
 	next   = map[string]time.Time{} // по серверу: когда можно отправлять следующий кусок
 	sleep  = time.Sleep
 	now    = time.Now
 )
 
-// SetRate — откуда брать скорость (МБ/с на сервер; ≤ 0 — DefaultMBps). Сервер передаёт
-// функцию от своих настроек: изменение в «Настройках» действует сразу, без перезапуска.
-func SetRate(f func() float64) {
+// SetRate — откуда брать скорость сервера host (МБ/с; ≤ 0 — DefaultMBps). Сервер передаёт
+// функцию от своих настроек (общая скорость и своя у профиля): изменение в «Настройках»
+// действует сразу, без перезапуска.
+func SetRate(f func(host string) float64) {
 	mu.Lock()
 	defer mu.Unlock()
 	rateFn = f
@@ -91,7 +92,7 @@ func readLimited(path, host string) ([]byte, error) {
 // Полоса общая для всех, кто читает с этого сервера (признаки, архив, страницы).
 func wait(host string, n int) {
 	mu.Lock()
-	rate := rateFn()
+	rate := rateFn(host)
 	if rate <= 0 {
 		rate = DefaultMBps
 	}

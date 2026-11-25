@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/KudinovArtemilus/press-go/internal/archive"
 	"github.com/KudinovArtemilus/press-go/internal/batch"
+	"github.com/KudinovArtemilus/press-go/internal/config"
 	"github.com/KudinovArtemilus/press-go/internal/extract"
 	"github.com/KudinovArtemilus/press-go/internal/features"
 )
@@ -31,7 +33,8 @@ type featRunner struct {
 	mu      sync.Mutex
 	running bool
 	started time.Time
-	doing   string // что делается сейчас — для «Настроек» во время прохода
+	doing   string            // что делается сейчас — для «Настроек» во время прохода
+	doingBy map[string]string // то же по машинам: у каждой свой поток
 	st      featStatus
 	done    map[string]featDone           // по операции: что уже в таблице
 	failed  map[string]time.Time          // файл → когда не прочитался (не повторяем каждые 5 минут)
@@ -123,6 +126,14 @@ func (fr *featRunner) Status() featStatus {
 	defer fr.mu.Unlock()
 	st := fr.st
 	st.Running, st.Started, st.Doing = fr.running, fr.started, fr.doing
+	if len(fr.doingBy) > 0 {
+		var parts []string
+		for _, d := range fr.doingBy {
+			parts = append(parts, d)
+		}
+		sort.Strings(parts) // порядок map случайный — на странице строки не должны прыгать
+		st.Doing = strings.Join(parts, "; ")
+	}
 	return st
 }
 
@@ -130,6 +141,20 @@ func (fr *featRunner) setDoing(s string) {
 	fr.mu.Lock()
 	fr.doing = s
 	fr.mu.Unlock()
+}
+
+// setDoingFor — что делает поток машины name ("" — закончил).
+func (fr *featRunner) setDoingFor(name, s string) {
+	fr.mu.Lock()
+	defer fr.mu.Unlock()
+	if fr.doingBy == nil {
+		fr.doingBy = map[string]string{}
+	}
+	if s == "" {
+		delete(fr.doingBy, name)
+	} else {
+		fr.doingBy[name] = s
+	}
 }
 
 // Start — проход сейчас и потом каждые every. Возвращается сразу.
@@ -206,14 +231,21 @@ func (fr *featRunner) Run() bool {
 		return true
 	}
 
-	// --- что где посчитать: все операции всех включённых профилей ---
+	// --- у каждой машины (профиля) свой поток: машины на разных серверах читаются одновременно,
+	// у каждой своя полоса netio. Внутри машины операции идут по очереди (один сервер). ---
 	// Таблицы — в одной папке, по операции; операция у включённых профилей одна на всех (config.Validate).
 	n := 0
 	for _, p := range profiles {
 		n += max(len(p.Ops), 1)
 	}
 	st.Ops = make([]featOpStatus, 0, n) // ёмкость сразу на все: указатели на элементы не «переедут»
-	var jobs []*featJob
+	type machine struct {
+		p     *config.Profile
+		roots []string
+		loc   *time.Location
+		ops   []int // номера в st.Ops
+	}
+	var ms []machine
 	for i, p := range profiles {
 		roots := c.Dirs(p) // у кольцевого буфера — папка с копиями, не само кольцо
 		if len(roots) == 0 && i == 0 {
@@ -224,39 +256,37 @@ func (fr *featRunner) Run() bool {
 				Err: "у профиля не указаны папки с .shp — «Настройки» → профиль"})
 			continue
 		}
-		loc := time.FixedZone(fmt.Sprintf("UTC%+d", p.TZ), p.TZ*3600)
+		m := machine{p: p, roots: roots, loc: time.FixedZone(fmt.Sprintf("UTC%+d", p.TZ), p.TZ*3600)}
 		for _, op := range p.Ops {
-			fr.setDoing(p.Name + " · " + op + ": смотрю папку…")
 			st.Ops = append(st.Ops, featOpStatus{Profile: p.Name, Op: op})
-			if j := fr.plan(p.Name, op, features.VersionFor(p.Kind), dir, roots, loc, &st.Ops[len(st.Ops)-1]); j != nil {
-				jobs = append(jobs, j)
+			m.ops = append(m.ops, len(st.Ops)-1)
+		}
+		ms = append(ms, m)
+	}
+	deadline := fr.now().Add(fr.budget) // у каждой машины — всё время прохода
+	all := make([][]*featJob, len(ms))
+	var wg sync.WaitGroup
+	for mi, m := range ms {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer fr.setDoingFor(m.p.Name, "")
+			var jobs []*featJob
+			for _, k := range m.ops {
+				op := st.Ops[k].Op
+				fr.setDoingFor(m.p.Name, m.p.Name+" · "+op+": смотрю папку…")
+				if j := fr.plan(m.p.Name, op, features.VersionFor(m.p.Kind), dir, m.roots, m.loc, &st.Ops[k]); j != nil {
+					jobs = append(jobs, j)
+				}
 			}
-		}
+			fr.runMachine(jobs, deadline)
+			all[mi] = jobs
+		}()
 	}
-	// --- круг 1: каждой машине её доля времени на новые циклы — сначала featFair в любом
-	// случае, потом порциями; таблица читается и пишется один раз за круг (у пресса это
-	// ~85 МБ и десятки секунд). Неиспользованное время переходит к следующим машинам.
-	// круг 2: остаток времени — новым, кому не хватило доли; круг 3 — истории ---
-	deadline := fr.now().Add(fr.budget)
-	chunks := func(j *featJob, end int, phase string, until time.Time) {
-		for j.taken < end && j.st.Err == "" && fr.now().Before(until) {
-			k := min(end, j.taken+featChunk)
-			fr.apply(j, j.todo[j.taken:k], phase)
-		}
-	}
-	for k, j := range jobs {
-		slice := fr.now().Add(deadline.Sub(fr.now()) / time.Duration(len(jobs)-k))
-		fr.apply(j, j.todo[:min(j.fresh, featFair, fr.perPass)], "новые")
-		chunks(j, min(j.fresh, fr.perPass), "новые", slice)
-		fr.flush(j)
-	}
-	for _, j := range jobs {
-		chunks(j, min(j.fresh, fr.perPass), "новые", deadline)
-		fr.flush(j)
-	}
-	for _, j := range jobs {
-		chunks(j, min(len(j.todo), fr.perPass), "история", deadline)
-		fr.flush(j)
+	wg.Wait()
+	var jobs []*featJob
+	for _, js := range all {
+		jobs = append(jobs, js...)
 	}
 	more := false
 	for _, j := range jobs {
@@ -381,6 +411,33 @@ func (fr *featRunner) plan(name, op string, version int, dir string, roots []str
 		table: table, dirty: st.Merged > 0, savedAt: fr.now(), st: st}
 }
 
+// runMachine — операции одной машины до deadline. Круг 1: каждой операции её доля времени на
+// новые — featFair в любом случае, дальше порциями; таблица читается и пишется раз за долю
+// (у пресса это ~85 МБ и десятки секунд); неиспользованное время — следующим. Круг 2: остаток —
+// новым, кому не хватило доли; круг 3 — истории.
+func (fr *featRunner) runMachine(jobs []*featJob, deadline time.Time) {
+	chunks := func(j *featJob, end int, phase string, until time.Time) {
+		for j.taken < end && j.st.Err == "" && fr.now().Before(until) {
+			k := min(end, j.taken+featChunk)
+			fr.apply(j, j.todo[j.taken:k], phase)
+		}
+	}
+	for k, j := range jobs {
+		slice := fr.now().Add(deadline.Sub(fr.now()) / time.Duration(len(jobs)-k))
+		fr.apply(j, j.todo[:min(j.fresh, featFair, fr.perPass)], "новые")
+		chunks(j, min(j.fresh, fr.perPass), "новые", slice)
+		fr.flush(j)
+	}
+	for _, j := range jobs {
+		chunks(j, min(j.fresh, fr.perPass), "новые", deadline)
+		fr.flush(j)
+	}
+	for _, j := range jobs {
+		chunks(j, min(len(j.todo), fr.perPass), "история", deadline)
+		fr.flush(j)
+	}
+}
+
 // apply — посчитать files и дописать таблицу операции.
 func (fr *featRunner) apply(j *featJob, files []string, phase string) {
 	if len(files) == 0 || j.st.Err != "" {
@@ -396,8 +453,8 @@ func (fr *featRunner) apply(j *featJob, files []string, phase string) {
 	}
 	opt := j.opt
 	label := fmt.Sprintf("%s · %s, %s", j.name, j.op, phase)
-	opt.Progress = func(done, total int) { fr.setDoing(fmt.Sprintf("%s: %d из %d", label, done, total)) }
-	fr.setDoing(fmt.Sprintf("%s: 0 из %d", label, len(files)))
+	opt.Progress = func(done, total int) { fr.setDoingFor(j.name, fmt.Sprintf("%s: %d из %d", label, done, total)) }
+	fr.setDoingFor(j.name, fmt.Sprintf("%s: 0 из %d", label, len(files)))
 	if fr.onApply != nil {
 		fr.onApply(j.op, phase, len(files))
 	}

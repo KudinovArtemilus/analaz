@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/KudinovArtemilus/press-go/internal/config"
+	"github.com/KudinovArtemilus/press-go/internal/netio"
 )
 
 func adminServer(t *testing.T) (*Server, *config.Store) {
@@ -100,6 +101,25 @@ func TestAdminSaveProfile(t *testing.T) {
 	}
 	if p := st.Get().Profile("press5"); p == nil || len(p.Ops) != 1 || p.Ops[0] != "OP4" || !p.Ring {
 		t.Errorf("ОР4 → %+v", p)
+	}
+	// своя скорость чтения у профиля: сохраняется; пусто — общая; сервер профиля берёт свою
+	rus.Set("net_mbps", "8")
+	if rec := do(h, "POST", "/admin/profile", rus, true, nil); rec.Code != http.StatusSeeOther || st.Get().Profile("press5").NetMBps != 8 {
+		t.Fatalf("скорость профиля: %d %v", rec.Code, st.Get().Profile("press5").NetMBps)
+	}
+	c := st.Get()
+	c.Profile("press5").Sources = []string{`\\10.130.171.32\Datalogger`}
+	c.Profile("press5").Enabled = true
+	if r := c.NetRate("10.130.171.32", netio.Host); r != 8 {
+		t.Errorf("скорость сервера пресса 5: %v, ждали 8", r)
+	}
+	if r := c.NetRate("10.130.171.42", netio.Host); r != c.NetMBps {
+		t.Errorf("чужой сервер: %v, ждали общую %v", r, c.NetMBps)
+	}
+	rus.Set("net_mbps", "")
+	do(h, "POST", "/admin/profile", rus, true, nil)
+	if st.Get().Profile("press5").NetMBps != 0 {
+		t.Error("пустое поле — должна стать общая (0)")
 	}
 }
 

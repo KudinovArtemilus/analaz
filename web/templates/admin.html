@@ -57,6 +57,8 @@
         <label class="inline"
           title="регистратор пишет actual.shp → old01.shp, old02.shp… и сдвигает имена каждый цикл (пресс 5)"><input
             type="checkbox" name="ring" {{if .Ring}} checked{{end}}> кольцевой буфер</label>
+        <label title="своя скорость чтения с сервера этой машины; пусто — общая из «Хранение»">Чтение, МБ/с <input
+            name="net_mbps" value="{{if .NetMBps}}{{.NetMBps}}{{end}}" size="4" placeholder="общая"></label>
         {{if .Ring}}{{with index $.Ring .ID}}<div class="small muted wide">Кольцо: последний проход {{.Last.Format
           "02.01 15:04:05"}}, скопировано с запуска {{.Copied}}{{if not .LastNew.IsZero}} (последний новый цикл —
           {{.LastNew.Format "02.01 15:04"}}){{end}}{{if .Pruned}}, удалено старых копий {{.Pruned}}{{end}}
@@ -84,6 +86,8 @@
         <label class="wide">Папки с .shp — по одной на строку <textarea name="sources" rows="2"></textarea></label>
         <label class="inline"><input type="checkbox" name="enabled"> включён</label>
         <label class="inline"><input type="checkbox" name="ring"> кольцевой буфер (actual.shp, old01.shp…)</label>
+        <label title="своя скорость чтения с сервера этой машины; пусто — общая из «Хранение»">Чтение, МБ/с <input
+            name="net_mbps" size="4" placeholder="общая"></label>
         <div class="actions"><button type="submit">Добавить</button></div>
       </form>
     </details>

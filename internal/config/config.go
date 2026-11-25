@@ -59,8 +59,9 @@ type Profile struct {
 	Ops     []string          `json:"ops"`     // операции в именах файлов: OP1, OP2
 	TZ      int               `json:"tz"`      // часовой пояс времени в имени файла, часы от UTC
 	Enabled bool              `json:"enabled"`
-	Ring    bool              `json:"ring"`    // папки — кольцевой буфер (actual.shp, old01.shp…): циклы копируются к себе, см. internal/ring
-	Aliases map[string]string `json:"aliases"` // своё название: исходное имя канала или признака → как показывать
+	NetMBps float64           `json:"net_mbps,omitempty"` // своя скорость чтения с сервера(ов) профиля, МБ/с (0 — общая из «Хранение»)
+	Ring    bool              `json:"ring"`               // папки — кольцевой буфер (actual.shp, old01.shp…): циклы копируются к себе, см. internal/ring
+	Aliases map[string]string `json:"aliases"`            // своё название: исходное имя канала или признака → как показывать
 }
 
 var (
@@ -343,4 +344,21 @@ func (c *Config) Dirs(p *Profile) []string {
 		out[i] = c.RingDir(p, i)
 	}
 	return out
+}
+
+// NetRate — скорость чтения с сетевого сервера host, МБ/с: своя у профиля, чья папка на этом
+// сервере (если задана), иначе общая. ≤ 0 — по умолчанию netio.
+func (c *Config) NetRate(host string, hostOf func(string) string) float64 {
+	for i := range c.Profiles {
+		p := &c.Profiles[i]
+		if !p.Enabled || p.NetMBps <= 0 {
+			continue
+		}
+		for _, src := range p.Sources {
+			if hostOf(src) == host {
+				return p.NetMBps
+			}
+		}
+	}
+	return c.NetMBps
 }

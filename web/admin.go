@@ -34,7 +34,7 @@ import (
 // (Если после этого вызвать EnableAnalysis с явной папкой — она главнее.)
 func (s *Server) UseConfig(st *config.Store) {
 	s.cfg = st
-	netio.SetRate(func() float64 { return st.Get().NetMBps }) // меняется в «Хранение» — действует сразу
+	netio.SetRate(func(host string) float64 { return st.Get().NetRate(host, netio.Host) }) // меняется в «Настройках» — действует сразу
 	s.arch = newArchiveRunner(s)
 	s.feat = newFeatRunner(s)
 	s.ring = newRingRunner(s)
@@ -186,6 +186,14 @@ func (s *Server) adminSaveProfile(w http.ResponseWriter, r *http.Request) {
 		p.TZ = tz
 		p.Enabled = f.Get("enabled") == "on"
 		p.Ring = f.Get("ring") == "on"
+		p.NetMBps = 0
+		if v := strings.TrimSpace(strings.ReplaceAll(f.Get("net_mbps"), ",", ".")); v != "" {
+			x, err := strconv.ParseFloat(v, 64)
+			if err != nil || x < 0.1 || x > 1000 {
+				return fmt.Errorf("скорость чтения профиля: МБ/с от 0,1 до 1000 (пусто — общая), получили %q", v)
+			}
+			p.NetMBps = x
+		}
 		return nil
 	})
 	if err != nil {

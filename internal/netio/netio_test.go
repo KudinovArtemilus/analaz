@@ -32,8 +32,13 @@ func TestRate(t *testing.T) {
 	sleep = func(d time.Duration) { slept += d; clock = clock.Add(d) }
 	now = func() time.Time { return clock }
 	defer func() { sleep, now = time.Sleep, time.Now }()
-	SetRate(func() float64 { return 4 })
-	defer SetRate(func() float64 { return DefaultMBps })
+	SetRate(func(h string) float64 {
+		if h == "press10" {
+			return 40 // своя скорость у сервера пресса
+		}
+		return 4
+	})
+	defer SetRate(func(string) float64 { return DefaultMBps })
 
 	got, err := readLimited(p, "kps")
 	if err != nil || !bytes.Equal(got, data) {
@@ -48,8 +53,8 @@ func TestRate(t *testing.T) {
 		t.Errorf("второй файл: пауз %v — полоса сервера должна быть общей", d)
 	}
 	before = slept
-	readLimited(p, "press10") // другой сервер — своя полоса, первый кусок без ожидания
-	if d := slept - before; d > 260*time.Millisecond {
-		t.Errorf("другой сервер: пауз %v", d)
+	readLimited(p, "press10") // другой сервер — своя полоса и своя скорость (40 МБ/с): ~0,025 с
+	if d := slept - before; d > 40*time.Millisecond {
+		t.Errorf("другой сервер: пауз %v, ждали ~0,025 с", d)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -213,9 +214,12 @@ func TestFeaturesFreshFirstAcrossMachines(t *testing.T) {
 	s.feat.perPass = 3
 	h := s.Handler()
 
-	var order []string
+	var mu sync.Mutex
+	order := map[string][]string{} // по операции: у каждой машины свой поток, между машинами порядка нет
 	s.feat.onApply = func(op, phase string, n int) {
-		order = append(order, fmt.Sprintf("%s %s %d", op, phase, n))
+		mu.Lock()
+		order[op] = append(order[op], fmt.Sprintf("%s %d", phase, n))
+		mu.Unlock()
 		fs := s.feat.Status()
 		if !fs.Running || !strings.Contains(fs.Doing, op) || !strings.Contains(fs.Doing, phase) {
 			t.Errorf("во время прохода статус: running=%v doing=%q", fs.Running, fs.Doing)
@@ -228,8 +232,8 @@ func TestFeaturesFreshFirstAcrossMachines(t *testing.T) {
 		t.Fatal("проход не запустился")
 	}
 	// пресс: новый — 1 (10-й), история — в остаток лимита 3 − 1 = 2; КПС (новая машина): 3 из 4.
-	// Новые КПС — раньше истории пресса.
-	if want := []string{"OP1 новые 1", "OP3 новые 3", "OP1 история 2"}; !slices.Equal(order, want) {
+	// У каждой машины свой поток: новые КПС не ждут истории пресса.
+	if !slices.Equal(order["OP1"], []string{"новые 1", "история 2"}) || !slices.Equal(order["OP3"], []string{"новые 3"}) {
 		t.Fatalf("порядок фаз: %v", order)
 	}
 	fs := s.feat.Status()
@@ -321,11 +325,21 @@ func TestFeaturesRecomputeOldVersion(t *testing.T) {
 	s, _ := New(press, time.UTC)
 	s.UseConfig(st)
 	s.feat.perPass = 4
+	var mu sync.Mutex
 	var order []string
-	s.feat.onApply = func(op, phase string, n int) { order = append(order, fmt.Sprintf("%s %s %d", op, phase, n)) }
+	s.feat.onApply = func(op, phase string, n int) {
+		mu.Lock()
+		order = append(order, fmt.Sprintf("%s %s %d", op, phase, n))
+		mu.Unlock()
+	}
+	sorted := func() []string { // машины — в своих потоках: порядок между ними не задан
+		out := slices.Clone(order)
+		slices.Sort(out)
+		return out
+	}
 
-	s.feat.Run() // пресс: 6 новых (лимит 4); КПС: новых нет, пересчёт 4 из 6 — в «истории», после новых
-	if want := []string{"OP1 новые 4", "OP3 история 4"}; !slices.Equal(order, want) {
+	s.feat.Run() // пресс: 6 новых (лимит 4); КПС: новых нет, пересчёт 4 из 6 — в «истории»
+	if want := []string{"OP1 новые 4", "OP3 история 4"}; !slices.Equal(sorted(), want) {
 		t.Fatalf("порядок: %v", order)
 	}
 	op3 := s.feat.Status().Ops[1]
@@ -334,7 +348,7 @@ func TestFeaturesRecomputeOldVersion(t *testing.T) {
 	}
 	order = nil
 	s.feat.Run() // пресс: оставшиеся 2 новых; КПС: оставшиеся 2 на пересчёт
-	if want := []string{"OP1 новые 2", "OP3 история 2"}; !slices.Equal(order, want) {
+	if want := []string{"OP1 новые 2", "OP3 история 2"}; !slices.Equal(sorted(), want) {
 		t.Fatalf("второй проход, порядок: %v", order)
 	}
 	op3 = s.feat.Status().Ops[1]
