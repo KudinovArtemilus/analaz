@@ -994,6 +994,7 @@ func (s *Server) analysisRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/analysis/{op}/health", h(s.analysisHealth))
 	mux.HandleFunc("GET /api/analysis/{op}/groups", h(s.analysisGroups))
 	mux.HandleFunc("GET /api/analysis/{op}/compare", h(s.analysisCompare))
+	mux.HandleFunc("GET /api/analysis/{op}/shapes", h(s.analysisShapes))
 	mux.HandleFunc("GET /api/analysis/{op}/prestops", h(s.analysisPreStops))
 	mux.HandleFunc("GET /api/analysis/{op}/heats", h(s.analysisHeats))
 	mux.HandleFunc("GET /api/analysis/{op}/dies", h(s.analysisDies))

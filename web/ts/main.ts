@@ -5,6 +5,7 @@ import "./analysis";
 import "./health";
 import "./groups";
 import "./compare";
+import "./shapes";
 import "./prestops";
 import "./hourly";
 import "./heats";

@@ -108,12 +108,12 @@ func TestAdminSaveProfile(t *testing.T) {
 		t.Fatalf("скорость профиля: %d %v", rec.Code, st.Get().Profile("press5").NetMBps)
 	}
 	c := st.Get()
-	c.Profile("press5").Sources = []string{`\\10.130.171.32\Datalogger`}
+	c.Profile("press5").Sources = []string{`\\192.0.2.32\Datalogger`}
 	c.Profile("press5").Enabled = true
-	if r := c.NetRate("10.130.171.32", netio.Host); r != 8 {
+	if r := c.NetRate("192.0.2.32", netio.Host); r != 8 {
 		t.Errorf("скорость сервера пресса 5: %v, ждали 8", r)
 	}
-	if r := c.NetRate("10.130.171.42", netio.Host); r != c.NetMBps {
+	if r := c.NetRate("192.0.2.42", netio.Host); r != c.NetMBps {
 		t.Errorf("чужой сервер: %v, ждали общую %v", r, c.NetMBps)
 	}
 	rus.Set("net_mbps", "")

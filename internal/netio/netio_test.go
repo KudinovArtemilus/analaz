@@ -10,10 +10,10 @@ import (
 
 func TestHost(t *testing.T) {
 	for in, want := range map[string]string{
-		`\\10.130.1.2\BufferShp\2026\a.shp`: "10.130.1.2",
-		`//Srv/share/a.shp`:                 "srv",
-		`D:\press_go\a.shp`:                 "",
-		`/tmp/a.shp`:                        "",
+		`\\192.0.2.1\BufferShp\2026\a.shp`: "192.0.2.1",
+		`//Srv/share/a.shp`:                "srv",
+		`D:\press_go\a.shp`:                "",
+		`/tmp/a.shp`:                       "",
 	} {
 		if got := Host(in); got != want {
 			t.Errorf("Host(%q) = %q, ждали %q", in, got, want)
