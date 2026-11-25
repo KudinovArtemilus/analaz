@@ -158,6 +158,15 @@ func TestAnalysisFolderFromConfig(t *testing.T) {
 	if st.Get().FeaturesDir != dir {
 		t.Fatal("папка не сохранилась")
 	}
+	// скорость чтения с сетевых папок: запятая — как в русской записи; 0 — нельзя (встанет всё)
+	form := url.Values{"keep_days": {"30"}, "keep_every": {"20"}, "max_gb": {"400"}, "features_dir": {dir}, "data_dir": {`C:\press-go-data`}, "net_mbps": {"1,5"}}
+	if rec := do(h, "POST", "/admin/archive", form, true, nil); rec.Code != http.StatusSeeOther || st.Get().NetMBps != 1.5 {
+		t.Fatalf("скорость 1,5: код %d, сохранено %v", rec.Code, st.Get().NetMBps)
+	}
+	form.Set("net_mbps", "0")
+	if rec := do(h, "POST", "/admin/archive", form, true, nil); rec.Code == http.StatusSeeOther || st.Get().NetMBps != 1.5 {
+		t.Errorf("скорость 0 сохранилась: %d, %v", rec.Code, st.Get().NetMBps)
+	}
 	rec = do(h, "GET", "/analysis?op=OP1", nil, false, nil)
 	if !strings.Contains(rec.Body.String(), "Пресс 10 OP1") {
 		t.Errorf("после смены папки анализа нет\n%.300s", rec.Body.String())

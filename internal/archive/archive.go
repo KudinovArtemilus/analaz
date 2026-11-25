@@ -31,6 +31,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/KudinovArtemilus/press-go/internal/netio"
 )
 
 // Archive — папка архива: <Root>/<путь как в буфере>.gz и журнал index.jsonl.
@@ -136,7 +138,7 @@ func (a *Archive) Save(src, rel, op string, reasons []string) (bool, error) {
 	if a.Has(rel) {
 		return false, nil
 	}
-	data, err := os.ReadFile(src)
+	data, err := netio.ReadFile(src) // источник часто сетевой: с ограничением скорости
 	if err != nil {
 		return false, err
 	}

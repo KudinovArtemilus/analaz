@@ -20,6 +20,7 @@ import (
 
 	"github.com/KudinovArtemilus/press-go/internal/analyze"
 	"github.com/KudinovArtemilus/press-go/internal/config"
+	"github.com/KudinovArtemilus/press-go/internal/netio"
 	"github.com/KudinovArtemilus/press-go/internal/ring"
 	"github.com/KudinovArtemilus/press-go/internal/shp"
 )
@@ -33,6 +34,7 @@ import (
 // (Если после этого вызвать EnableAnalysis с явной папкой — она главнее.)
 func (s *Server) UseConfig(st *config.Store) {
 	s.cfg = st
+	netio.SetRate(func() float64 { return st.Get().NetMBps }) // меняется в «Хранение» — действует сразу
 	s.arch = newArchiveRunner(s)
 	s.feat = newFeatRunner(s)
 	s.ring = newRingRunner(s)
@@ -213,6 +215,13 @@ func (s *Server) adminSaveArchive(w http.ResponseWriter, r *http.Request) {
 				return fmt.Errorf("копии кольцевого буфера: дней — целое ≥ 1, получили %q", v)
 			}
 			ringDays = n
+		}
+		if v := strings.TrimSpace(strings.ReplaceAll(f.Get("net_mbps"), ",", ".")); v != "" {
+			x, err := strconv.ParseFloat(v, 64)
+			if err != nil || x < 0.1 || x > 1000 {
+				return fmt.Errorf("скорость чтения с сетевой папки: МБ/с от 0,1 до 1000, получили %q", v)
+			}
+			c.NetMBps = x
 		}
 		c.Archive = config.Archive{KeepDays: days, KeepEvery: every, MaxGB: gb, RingDays: ringDays}
 		c.FeaturesDir = strings.TrimSpace(f.Get("features_dir"))

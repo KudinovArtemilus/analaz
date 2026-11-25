@@ -18,10 +18,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/KudinovArtemilus/press-go/internal/netio"
 )
 
 const (
@@ -104,7 +105,7 @@ func (f *File) Times() []float64 {
 
 // Read читает и разбирает файл с диска.
 func Read(path string) (*File, error) {
-	data, err := os.ReadFile(path)
+	data, err := netio.ReadFile(path) // с сетевой папки — не быстрее заданной скорости (не забить линию машины)
 	if err != nil {
 		return nil, err
 	}

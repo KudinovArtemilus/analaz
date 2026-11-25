@@ -100,6 +100,10 @@
         <label>Фон — каждый N-й цикл (по ходу штампа) <input name="keep_every" value="{{.C.Archive.KeepEvery}}"
             size="4"></label>
         <label>Потолок архива, ГБ <input name="max_gb" value="{{.C.Archive.MaxGB}}" size="5"></label>
+        <label
+          title="КПС, пресс 5 и др. отдают файлы по линии самой машины: если читать без ограничения, линия забивается">Чтение
+          с сетевой папки, МБ/с на сервер <input name="net_mbps" value="{{if .C.NetMBps}}{{.C.NetMBps}}{{else}}2{{end}}"
+            size="4"> <span class="muted small">2 МБ/с ≈ 16 Мбит/с; линия машины виснет — уменьшить</span></label>
         <label>Копии кольцевого буфера, дней <input name="ring_days"
             value="{{if .C.Archive.RingDays}}{{.C.Archive.RingDays}}{{else}}2{{end}}" size="3"> <span
             class="muted small">папка данных\ring; ~2,4 ГБ в сутки у пресса 5</span></label>

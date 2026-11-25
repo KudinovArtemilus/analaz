@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KudinovArtemilus/press-go/internal/netio"
 	"github.com/KudinovArtemilus/press-go/internal/shp"
 )
 
@@ -126,7 +127,7 @@ func (c *Capture) Run() (Result, error) {
 // copyOne — прочитать файл кольца одним открытием и сохранить копию, если её ещё нет.
 // false без ошибки — такая копия уже есть (тот же цикл под другим именем или после перезапуска).
 func (c *Capture) copyOne(src string, loc *time.Location) (bool, error) {
-	d, err := os.ReadFile(src)
+	d, err := netio.ReadFile(src) // кольцо — на сетевой папке: с ограничением скорости
 	if err != nil {
 		return false, err
 	}
