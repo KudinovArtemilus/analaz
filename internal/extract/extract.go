@@ -120,6 +120,9 @@ type Options struct {
 	Skip func(path string) bool
 	// SaveEvery — сохранять таблицу каждые N добавленных циклов (0 — 500).
 	SaveEvery int
+	// NoSave — Apply таблицу не записывает: запишет вызывающий (сервер пишет её не чаще раза
+	// в пару минут: таблица пресса на 10 тыс. циклов — около 85 МБ, запись — десятки секунд).
+	NoSave bool
 	// Progress — сколько файлов из todo уже обработано (после каждого файла); nil — не звать.
 	Progress func(done, total int)
 	// Log — сообщения о ходе; nil — молчать. Verbose — ещё и по каждому файлу.
@@ -339,7 +342,7 @@ func Apply(table *batch.Table, outPath string, todo []string, st Stats, opt Opti
 			rate := float64(k) / time.Since(t0).Seconds()
 			logf("--- %d/%d  %.1f файл/с  осталось ~%.0f мин\n", k, len(todo), rate, float64(len(todo)-k)/rate/60)
 		}
-		if saveErr == nil && sinceSave > 0 && (sinceSave >= saveEvery || k == len(todo)) {
+		if !opt.NoSave && saveErr == nil && sinceSave > 0 && (sinceSave >= saveEvery || k == len(todo)) {
 			if saveErr = Save(table, outPath); saveErr == nil {
 				st.Saves++
 				logf("  сохранено -> %s (%d строк)\n", outPath, table.Len())

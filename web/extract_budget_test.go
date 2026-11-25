@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KudinovArtemilus/press-go/internal/batch"
 	"github.com/KudinovArtemilus/press-go/internal/config"
 )
 
@@ -41,18 +42,57 @@ func TestFeaturesBudget(t *testing.T) {
 	}
 
 	s.feat.Run()
-	// 0–1 мин: пресс 10 новых; 1–2: КПС 10; 2–3: пресс ещё 20 (порция ≤ 25); 3 мин — время вышло
-	if want := []string{"OP1 новые 10", "OP3 новые 10", "OP1 новые 20"}; !slices.Equal(order, want) {
+	// 0–1 мин: пресс 10 новых; 1–2: КПС 10; 2–3: пресс ещё порцию 10; 3 мин — время вышло
+	if want := []string{"OP1 новые 10", "OP3 новые 10", "OP1 новые 10"}; !slices.Equal(order, want) {
 		t.Fatalf("порядок: %v", order)
 	}
 	fs := s.feat.Status()
-	if fs.Ops[0].Todo != 0 || fs.Ops[1].Todo != 5 || fs.Ops[1].Added != 10 || !s.feat.more {
+	if fs.Ops[0].Todo != 10 || fs.Ops[1].Todo != 5 || fs.Ops[0].Added != 20 || fs.Ops[1].Added != 10 || !s.feat.more {
 		t.Fatalf("после прохода: пресс осталось %d, КПС осталось %d, добавлено %d, more=%v",
 			fs.Ops[0].Todo, fs.Ops[1].Todo, fs.Ops[1].Added, s.feat.more)
 	}
 	order = nil
 	s.feat.Run()
-	if want := []string{"OP3 новые 5"}; !slices.Equal(order, want) || s.feat.more {
+	if want := []string{"OP1 новые 10", "OP3 новые 5"}; !slices.Equal(order, want) || s.feat.more {
 		t.Fatalf("второй проход: %v, more=%v", order, s.feat.more)
+	}
+}
+
+// TestFeaturesTableIO — таблица операции читается и записывается раз на фазу, а не после
+// каждой порции: у пресса она — десятки МБ.
+func TestFeaturesTableIO(t *testing.T) {
+	press, feat := t.TempDir(), t.TempDir()
+	for i := range 35 {
+		shpOf(t, press, "OP1", i, []string{"slide:total force [kN]"})
+	}
+	st, _ := config.Open(filepath.Join(t.TempDir(), "pressgo.json"), config.Default())
+	st.Update(func(c *config.Config) error {
+		c.FeaturesDir = feat
+		p := c.Active()
+		p.Sources, p.Ops = []string{press}, []string{"OP1"}
+		return nil
+	})
+	s, _ := New(press, time.UTC)
+	s.UseConfig(st)
+	target := filepath.Join(feat, "features_OP1.csv.gz")
+	saves := 0
+	var last time.Time
+	s.feat.onApply = func(op, phase string, n int) {
+		if m := modTime(target); !m.Equal(last) {
+			saves++
+			last = m
+		}
+	}
+	s.feat.Run() // 10 (фаза 0, запись) + 25 порциями по 10 (фаза 1, одна запись в конце)
+	if fs := s.feat.Status(); fs.Ops[0].Added != 35 || fs.Ops[0].Rows != 35 {
+		t.Fatalf("%+v", fs.Ops[0])
+	}
+	// перед порциями фазы 1 таблица на диске менялась один раз — после фазы 0
+	if saves != 1 {
+		t.Errorf("записей таблицы между порциями: %d, ждали 1 (после фазы 0)", saves)
+	}
+	tb, err := batch.ReadCSVGz(target)
+	if err != nil || tb.Len() != 35 {
+		t.Fatalf("на диске %v строк, %v", tbLen(tb), err)
 	}
 }

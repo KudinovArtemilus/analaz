@@ -69,8 +69,13 @@ const (
 	// вышло featBudget. Не успели — следующий проход через featBusyEvery, а не через 5 минут.
 	featBudget    = 4 * time.Minute
 	featFair      = 10
-	featChunk     = 25
+	featChunk     = 10
 	featBusyEvery = 30 * time.Second
+	// Таблица операции читается один раз на фазу и держится в памяти, пока идут её порции;
+	// записывается в конце фазы, а внутри длинной фазы — не чаще featSaveEvery. Раньше она
+	// перечитывалась и записывалась после каждой порции, а таблица пресса на 10 тыс. циклов —
+	// около 85 МБ: проход уходил в чтение-запись таблиц, а не в подсчёт.
+	featSaveEvery = 2 * time.Minute
 )
 
 // featStatus — итог последнего законченного прохода и, если идёт, текущий (для «Настроек»).
@@ -157,6 +162,8 @@ type featJob struct {
 	fresh    int      // сколько в начале todo новых
 	taken    int      // взято в этом проходе
 	table    *batch.Table
+	dirty    bool      // в таблице есть незаписанное
+	savedAt  time.Time // когда таблицу последний раз записали (или прочитали)
 	st       *featOpStatus
 }
 
@@ -231,6 +238,7 @@ func (fr *featRunner) Run() bool {
 	deadline := fr.now().Add(fr.budget)
 	for _, j := range jobs {
 		fr.apply(j, j.todo[:min(j.fresh, featFair, fr.perPass)], "новые")
+		fr.flush(j)
 	}
 	chunks := func(j *featJob, end int, phase string) {
 		for j.taken < end && j.st.Err == "" && fr.now().Before(deadline) {
@@ -240,21 +248,15 @@ func (fr *featRunner) Run() bool {
 	}
 	for _, j := range jobs {
 		chunks(j, min(j.fresh, fr.perPass), "новые")
+		fr.flush(j)
 	}
 	for _, j := range jobs {
 		chunks(j, min(len(j.todo), fr.perPass), "история")
+		fr.flush(j)
 	}
 	more := false
 	for _, j := range jobs {
-		if j.table != nil && j.st.Err == "" { // перенесли строки, а файлов не было — всё равно сохранить
-			if err := extract.Save(j.table, j.target); err != nil {
-				j.st.Err = fmt.Sprintf("не записать %s: %v", j.target, err)
-				fr.forget(j.op)
-			} else {
-				fr.remember(j.op, doneOf(j.table, modTime(j.target), j.version))
-			}
-			j.table = nil
-		}
+		fr.flush(j) // перенесли строки, а файлов не было — всё равно записать
 		j.st.Todo = len(j.todo) - j.taken
 		j.st.Stale = max(j.st.Stale-j.st.Redone, 0)
 		if j.st.Todo > 0 && j.st.Err == "" {
@@ -370,7 +372,9 @@ func (fr *featRunner) plan(name, op string, version int, dir string, roots []str
 	if st.Merged == 0 {
 		table = nil // таблицу прочитаем, когда дойдёт очередь: держать в памяти все сразу незачем
 	}
-	return &featJob{name: name, op: op, version: version, target: target, opt: opt, todo: todo, fresh: ps.Fresh, table: table, st: st}
+	opt.NoSave = true // таблицу записывает flush: не после каждой порции
+	return &featJob{name: name, op: op, version: version, target: target, opt: opt, todo: todo, fresh: ps.Fresh,
+		table: table, dirty: st.Merged > 0, savedAt: fr.now(), st: st}
 }
 
 // apply — посчитать files и дописать таблицу операции.
@@ -384,7 +388,7 @@ func (fr *featRunner) apply(j *featJob, files []string, phase string) {
 			j.st.Err = err.Error()
 			return
 		}
-		j.table = t
+		j.table, j.savedAt = t, fr.now()
 	}
 	opt := j.opt
 	label := fmt.Sprintf("%s · %s, %s", j.name, j.op, phase)
@@ -393,21 +397,10 @@ func (fr *featRunner) apply(j *featJob, files []string, phase string) {
 	if fr.onApply != nil {
 		fr.onApply(j.op, phase, len(files))
 	}
-	as, err := extract.Apply(j.table, j.target, files, extract.Stats{}, opt)
+	as, _ := extract.Apply(j.table, j.target, files, extract.Stats{}, opt) // NoSave: записи нет — ошибки записи тоже
 	j.taken += len(files)
-	if err != nil {
-		j.st.Err = fmt.Sprintf("не записать %s: %v", j.target, err)
-		fr.forget(j.op) // таблица на диске могла остаться старой — в следующий раз перечитаем
-		j.table = nil
-		return
-	}
-	if as.Saves == 0 && j.st.Merged > 0 { // всё с ошибками, а перенос был — сохранить перенесённое
-		if err := extract.Save(j.table, j.target); err != nil {
-			j.st.Err = fmt.Sprintf("не записать %s: %v", j.target, err)
-			fr.forget(j.op)
-			j.table = nil
-			return
-		}
+	if as.Added+as.Redone > 0 {
+		j.dirty = true
 	}
 	j.st.Added += as.Added
 	j.st.Redone += as.Redone
@@ -424,8 +417,39 @@ func (fr *featRunner) apply(j *featJob, files []string, phase string) {
 			j.st.Errors = append(j.st.Errors, firstLine(e.Err.Error()))
 		}
 	}
+	// длинная фаза: записать по ходу, чтобы анализ видел новые циклы, не дожидаясь её конца
+	if j.dirty && fr.now().Sub(j.savedAt) >= featSaveEvery {
+		fr.save(j)
+	}
+}
+
+// save — записать таблицу операции (таблица остаётся в памяти).
+func (fr *featRunner) save(j *featJob) {
+	if j.table == nil || !j.dirty || j.st.Err != "" {
+		return
+	}
+	if err := extract.Save(j.table, j.target); err != nil {
+		j.st.Err = fmt.Sprintf("не записать %s: %v", j.target, err)
+		fr.forget(j.op) // таблица на диске могла остаться старой — в следующий раз перечитаем
+		j.table = nil
+		return
+	}
+	j.dirty, j.savedAt = false, fr.now()
 	fr.remember(j.op, doneOf(j.table, modTime(j.target), j.version))
-	j.table = nil // следующую фазу — с диска: все таблицы сразу в памяти не держим
+}
+
+// flush — конец фазы для операции: записать, что не записано, и отпустить таблицу
+// (все таблицы сразу в памяти не держим: у пресса это сотни МБ).
+func (fr *featRunner) flush(j *featJob) {
+	if j.table == nil {
+		return
+	}
+	if j.dirty {
+		fr.save(j)
+	} else if j.st.Err == "" {
+		fr.remember(j.op, doneOf(j.table, modTime(j.target), j.version))
+	}
+	j.table = nil
 }
 
 // archLookup — где в архиве цикл из таблицы признаков. Архив профиля открывается один раз
