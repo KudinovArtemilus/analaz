@@ -137,6 +137,9 @@ func Run(d *Dataset, o Options) (*Result, error) {
 		r.Sensors = SensorHealth(d, r.Prod, base)
 	}
 	r.Norms = r.Norm.Norms(r.Cols)
+	// σ не меньше шага записи: разница в одну точку — не отклонение (stepfloor.go)
+	floors := StepFloors(r.Prod, slices.Concat(r.Cols.Eng, r.Cols.Raw))
+	ApplyStepFloors(r.Norms, floors)
 
 	// ---------- аномалии ----------
 	r.SigEng = make([]float64, len(r.Cols.Eng)) // Norms кладёт инженерные первыми, в том же порядке
@@ -166,7 +169,7 @@ func Run(d *Dataset, o Options) (*Result, error) {
 
 	// ---------- диагноз по узлам ----------
 	r.SpanH = r.Prod.Times[r.Prod.Len()-1].Sub(r.Prod.Times[0]).Hours()
-	r.Diag, r.Notes = Evaluate(r.Prod, r.Norm.Median, r.Norm.SigmaMap(), r.SpanH, nil)
+	r.Diag, r.Notes = Evaluate(r.Prod, r.Norm.Median, floorSigmaMap(r.Norm.SigmaMap(), floors), r.SpanH, nil)
 	r.OpName = o.Op
 	if r.OpName == "" {
 		r.OpName = strings.Join(uniqueOps(d), ",")

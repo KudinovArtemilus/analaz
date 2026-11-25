@@ -174,6 +174,7 @@ func Daily(d *Dataset, day time.Time, op string, gapMin, zThr float64, stored *N
 	if T.Len() > 0 {
 		win = T
 	}
+	sig = floorSigmaMap(sig, StepFloors(P, slices.Concat(cols.Eng, cols.Raw))) // σ не меньше шага записи
 	r.Diag, r.Notes = Evaluate(P, normMed, sig, spanH, win)
 
 	// простои внутри суток, включая паузу от последнего цикла прошлых суток
