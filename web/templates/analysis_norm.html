@@ -1,5 +1,8 @@
 {{/* Профиль нормы — фрагмент для HTMX (6.2а). */}}
-<h3>Профиль нормы <span class="muted small">{{.From}} — {{.To}}, {{.Cycles}} циклов</span></h3>
+<h3>Профиль нормы <span class="muted small">{{.From}} — {{.To}}, {{.Cycles}} циклов{{with .Note}} · {{.}}{{end}}</span>
+</h3>
+{{with .Saved}}<div class="note small">{{.}}</div>{{end}}
+{{with .Err}}<div class="error small">Норма не пересчитана: {{.}}</div>{{end}}
 <p class="muted small">С чем сравнивается пресс: медиана и обычный разброс (5…95%) каждого признака в базовом периоде.
     {{if .Q}}Найдено {{.Total}} из {{.All}}{{if gt .Total (len .Rows)}}, показано {{len .Rows}}{{end}}.{{else}}Без
     поиска — ключевые показатели; поиском — любой из {{.All}} признаков.{{end}}</p>
@@ -25,3 +28,30 @@
         <td colspan="5" class="muted">ничего не найдено</td>
     </tr>{{end}}
 </table>
+{{if .Local}}
+<details class="norm-redo" {{if or .Err .Saved}} open{{end}}>
+    <summary><b>Пересчитать норму</b> <span class="muted small">— если она снята в неудачный период и всё после
+            выглядит отклонением</span></summary>
+    <p class="muted small">Норма — это «как машина работает, когда она исправна». Выберите период, когда с машиной
+        точно было всё в порядке: без ремонтов, без поиска неисправности, лучше целые сутки. Нужно не меньше
+        {{.MinCycles}} рабочих циклов этой операции (и колеса/рецепта, если он выбран). Прежняя норма не
+        удаляется — переименовывается в <code>….json.ДАТА.bak</code>, к ней можно вернуться.</p>
+    <form hx-post="/analysis/norm/save" hx-target="#an-norm"
+        hx-confirm="Заменить норму? Прежняя сохранится как .bak, все выводы пересчитаются по новой." class="form">
+        <input type="hidden" name="op" value="{{.Op}}">
+        {{with .Suggest}}<div class="small norm-sug"><b>Спокойные периоды</b> <span class="muted">(меньше остановов и
+                аномалий; исправна ли была машина — решаете вы):</span>
+            {{range .}}<div><button type="button"
+                    onclick="this.form.from.value='{{.From}}';this.form.to.value='{{.To}}'">выбрать</button>
+                {{.Label}} · {{.Cycles}} циклов{{if gt .Days 1}} за {{.Days}} сут{{end}} · остановов {{.Stops}} ·
+                аномальных {{printf "%.0f" .AnomPct}}%</div>{{end}}
+        </div>{{else}}<div class="muted small norm-sug">Периода с {{.MinCycles}} рабочими циклами подряд в данных не
+            нашлось.</div>{{end}}
+        <label>с <input type="datetime-local" step="1" name="from" min="{{.Min}}" max="{{.Max}}" required></label>
+        <label>по <input type="datetime-local" step="1" name="to" min="{{.Min}}" max="{{.Max}}" required></label>
+        <label class="wide">почему период хороший <input name="note" required
+                placeholder="сутки без остановов, после ППР, механики подтвердили"></label>
+        <div class="actions"><button type="submit">Пересчитать норму</button></div>
+    </form>
+</details>
+{{end}}

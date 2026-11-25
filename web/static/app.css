@@ -1110,3 +1110,24 @@ h4.sub {
     color: var(--muted);
     border: 1px solid var(--grid);
 }
+
+.norm-redo {
+    margin-top: 12px;
+}
+
+.norm-redo summary {
+    cursor: pointer;
+}
+
+.norm-redo .norm-sug {
+    flex-basis: 100%;
+}
+
+.norm-redo .norm-sug button {
+    padding: 1px 8px;
+    margin: 2px 6px 2px 0;
+}
+
+.norm-redo .actions {
+    flex-basis: 100%;
+}

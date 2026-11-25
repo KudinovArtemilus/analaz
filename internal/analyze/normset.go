@@ -210,7 +210,7 @@ func ParseWhen(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil
 	}
-	for _, l := range []string{"2006-01-02", "2006-01-02 15:04", "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
+	for _, l := range []string{"2006-01-02", "2006-01-02 15:04", "2006-01-02 15:04:05", "2006-01-02T15:04:05", "2006-01-02T15:04"} {
 		if t, err := time.Parse(l, s); err == nil {
 			return t, nil
 		}

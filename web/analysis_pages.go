@@ -621,12 +621,17 @@ func (s *Server) analysisNorm(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, errBadOp(op))
 		return
 	}
+	s.normFragment(w, r, op, strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q"))), nil)
+}
+
+// normFragment — профиль нормы и (только на этом компьютере) форма «Пересчитать норму».
+// msg — итог сохранения: Saved или Err.
+func (s *Server) normFragment(w http.ResponseWriter, r *http.Request, op, q string, msg map[string]any) {
 	res, err := s.an.get(op)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	row := func(f string) (normRowView, bool) {
 		fn, ok := res.Norm.Features[f]
 		if !ok || fn.Kind == "" {
@@ -655,8 +660,19 @@ func (s *Server) analysisNorm(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	s.render(w, "analysis_norm.html", map[string]any{"Op": op, "Q": q, "Rows": rows, "Total": total, "All": len(res.Norms),
-		"From": res.Norm.BaseFrom.Format("02.01.2006 15:04"), "To": res.Norm.BaseTo.Format("02.01.2006 15:04"), "Cycles": res.Norm.BaseCycles})
+	data := map[string]any{"Op": op, "Q": q, "Rows": rows, "Total": total, "All": len(res.Norms),
+		"From": res.Norm.BaseFrom.Format("02.01.2006 15:04"), "To": res.Norm.BaseTo.Format("02.01.2006 15:04"), "Cycles": res.Norm.BaseCycles,
+		"Note": res.Norm.Note, "Stored": res.Stored, "Local": isLocal(r), "MinCycles": analyze.AutoNormCycles}
+	if isLocal(r) {
+		data["Suggest"] = normSuggestViews(analyze.SuggestNormPeriods(res, analyze.AutoNormCycles, 3))
+		if n := res.Prod.Len(); n > 0 { // границы для полей даты: весь период данных
+			data["Min"], data["Max"] = res.Prod.Times[0].Format(normInputTF), res.Prod.Times[n-1].Format(normInputTF)
+		}
+	}
+	for k, v := range msg {
+		data[k] = v
+	}
+	s.render(w, "analysis_norm.html", data)
 }
 
 type cellRow struct {

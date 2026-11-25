@@ -34,8 +34,9 @@ type analysisStore struct {
 	// новую сразу, без перезапуска.
 	dirs func() (features, norms string)
 
-	mu    sync.Mutex
-	cache map[string]*analysisEntry // по операции
+	mu     sync.Mutex
+	cache  map[string]*analysisEntry // по операции
+	saveMu sync.Mutex                // пересчёт нормы человеком (analysis_normsave.go)
 
 	computed atomic.Int32 // сколько раз считали — для тестов и журнала
 }
@@ -182,7 +183,7 @@ func (a *analysisStore) compute(op string, e *analysisEntry) {
 
 // autoNorm — у колеса набралось AutoNormCycles рабочих циклов, а нормы ещё нет: сохранить его норму
 // по первым AutoNormCycles циклам и пересчитать по ней. Дальше норма не ползёт: файл не меняется,
-// пока его не заменит человек (утилитой analyze --save-norm). Существующий файл не перезаписывается.
+// пока его не заменит человек («Пересчитать норму» на странице «Анализ» или analyze --save-norm). Существующий файл не перезаписывается.
 func (a *analysisStore) autoNorm(op string, d *analyze.Dataset, opts analyze.Options, e *analysisEntry) {
 	p := e.res.Prod
 	path := a.normPath(op)
@@ -985,6 +986,7 @@ func (s *Server) analysisRoutes(mux *http.ServeMux) {
 			f(w, r)
 		}
 	}
+	mux.HandleFunc("POST /analysis/norm/save", localOnly(sameOrigin(h(s.analysisNormSave))))
 	mux.HandleFunc("GET /api/analysis", h(s.analysisOps))
 	mux.HandleFunc("GET /api/analysis/{op}", h(s.analysisSummary))
 	mux.HandleFunc("GET /api/analysis/{op}/anomalies", h(s.analysisAnomalies))

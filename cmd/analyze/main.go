@@ -61,7 +61,7 @@ type options struct {
 
 func main() {
 	var o options
-	flag.StringVar(&o.op, "op", "", "только эта операция, напр. OP1")
+	flag.StringVar(&o.op, "op", "", "только эта операция, напр. OP1; с колесом/рецептом — OP3@dv860-dw895, OP1@rcp60-650")
 	flag.StringVar(&o.out, "o", "analyze_go", "папка для результатов")
 	flag.Float64Var(&o.frac, "baseline-frac", 0.2, "доля первых по времени рабочих циклов как «норма»")
 	flag.StringVar(&o.baseFrom, "baseline-start", "", "норма с этого момента (ГГГГ-ММ-ДД или ГГГГ-ММ-ДД ЧЧ:ММ)")
@@ -93,7 +93,11 @@ func run(o options) error {
 		return fmt.Errorf("--damaged: ждали drop или keep, получили %q", o.damaged)
 	}
 	opts := analyze.DefaultOptions()
-	opts.Op, opts.BaselineFrac, opts.Z, opts.GapMin = o.op, o.frac, o.zThr, o.gapMin
+	opts.BaselineFrac, opts.Z, opts.GapMin = o.frac, o.zThr, o.gapMin
+	opts.Op, opts.Regime = analyze.SplitOp(o.op) // OP3@dv860-dw895 — колесо КПС, OP1@rcp60-650 — рецепт пресса
+	if opts.Regime == "all" {
+		opts.Regime = ""
+	}
 	opts.KeepDamaged, opts.Source, opts.Note = o.damaged == "keep", o.path, o.note
 	var err error
 	if opts.BaseFrom, err = analyze.ParseWhen(o.baseFrom); err != nil {
