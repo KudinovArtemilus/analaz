@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"fmt"
 	"math"
 	"slices"
 	"time"
@@ -61,8 +62,15 @@ type CorrMatrix struct {
 	Rho      [][]float64
 }
 
+// CorrPinned — признаки, которые есть в матрице всегда, даже если они не среди «трендовых»:
+// перекос ползуна (= перекос верхнего штампа относительно нижнего) и давление зажима штампа —
+// чтобы видеть, меняются ли они вместе. Нет у машины такого признака — его нет и в матрице.
+var CorrPinned = []string{"lr_dev_absmax_mm", "lr_dev_press_mean_mm",
+	"dieclamp_c1_min", "dieclamp_c2_min", "dieclamp_lower_min"}
+
 // Correlations — как в charts.py: cc = первые 25 признаков T (по score), которые инженерные;
-// матрица — только если признаков ≥ 3 и интервалов ≥ 5. nil — не строим.
+// после них — CorrPinned, которых среди них нет. Матрица — только если признаков ≥ 3 и
+// интервалов ≥ 5. nil — не строим.
 func (r *Result) Correlations() *CorrMatrix {
 	var idx []int // номера признаков в Bins.Med
 	var names []string
@@ -73,6 +81,12 @@ func (r *Result) Correlations() *CorrMatrix {
 		if j := slices.Index(r.Cols.Eng, t.Feature); j >= 0 {
 			idx = append(idx, j)
 			names = append(names, t.Feature)
+		}
+	}
+	for _, f := range CorrPinned {
+		if j := slices.Index(r.Cols.Eng, f); j >= 0 && !slices.Contains(names, f) && anyFinite(r.Bins.Med[j]) {
+			idx = append(idx, j)
+			names = append(names, f)
 		}
 	}
 	if len(idx) < 3 || len(r.Bins.Starts) < 5 {
@@ -141,6 +155,10 @@ var scatterPairs = []struct{ x, y, title string }{
 	{"die_strokes", "pos_bottom_mm", "Ходов штампа vs нижняя точка (износ штампа)"},
 	{"temp_bottom_mean", "press_time_s", "Температура масла vs время прессования"},
 	{"force_max_kN", "hp_drop", "Усилие vs просадка давления"},
+	// перекос штампа и его зажим: есть ли связь (пресс 10 — два контура, пресс 5 — нижний штамп)
+	{"lr_dev_absmax_mm", "dieclamp_c1_min", "Перекос ползуна vs зажим штампа, контур 1"},
+	{"lr_dev_absmax_mm", "dieclamp_c2_min", "Перекос ползуна vs зажим штампа, контур 2"},
+	{"lr_dev_absmax_mm", "dieclamp_lower_min", "Перекос ползуна vs зажим нижнего штампа"},
 }
 
 // Scatter — пары, у которых оба признака есть и хоть где-то не NaN.
@@ -165,7 +183,12 @@ func (r *Result) Scatter() []ScatterPair {
 		if x == nil || y == nil || !anyFinite(x) || !anyFinite(y) {
 			continue
 		}
-		out = append(out, ScatterPair{sp.x, sp.y, sp.title, x, y, days})
+		// ρ по циклам — прямой ответ «связаны ли»: |ρ| < 0,2 — связи почти нет, > 0,5 — заметная
+		title := sp.title
+		if rho, n := SpearmanPairwise(x, y), finitePairs(x, y); !math.IsNaN(rho) {
+			title += fmt.Sprintf(" · ρ = %+.2f по %d циклам", rho, n)
+		}
+		out = append(out, ScatterPair{sp.x, sp.y, title, x, y, days})
 	}
 	return out
 }
@@ -224,4 +247,15 @@ func floorTo(t time.Time, step time.Duration) time.Time {
 // та же функция, что для σ нормы — совпадает бит в бит).
 func quantileSorted(v []float64, q float64) float64 {
 	return features.NanPercentile(v, q*100)
+}
+
+// finitePairs — сколько циклов, где оба значения есть.
+func finitePairs(x, y []float64) int {
+	n := 0
+	for i := range x {
+		if !math.IsNaN(x[i]) && !math.IsNaN(y[i]) {
+			n++
+		}
+	}
+	return n
 }
