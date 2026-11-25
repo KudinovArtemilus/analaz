@@ -98,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.index) // {$} — только сам «/», а не всё подряд
 	mux.HandleFunc("GET /files", s.fileList)
 	mux.HandleFunc("GET /cycle", s.cycle)
+	mux.HandleFunc("GET /report", s.report)
 	mux.HandleFunc("GET /cycle/chart", s.chart)
 	mux.HandleFunc("GET /api/series", s.series)
 	mux.HandleFunc("GET /api/digital", s.digital)

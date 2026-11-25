@@ -16,7 +16,7 @@
     <header class="top">
         <span class="brand">press-go</span>
         <nav class="nav"><a href="/">Циклы</a><a href="/analysis" class="on">Анализ</a><a href="/piece">Заготовка</a><a
-                href="/admin">Настройки</a></nav>
+                href="/report">Отчёт</a><a href="/admin">Настройки</a></nav>
         {{if .Ops}}<nav class="tabs">{{$base := .BaseOp}}{{range .Ops}}<a href="/analysis?op={{.}}" {{if eq . $base}}
                 class="on" {{end}}>{{.}}</a>{{end}}</nav>{{end}}
     </header>
@@ -182,7 +182,8 @@
                 <b>установка</b> штампа. Штампы разные (своя геометрия и нагрузка), и общая норма это смазывает: усилие,
                 обычное для одного штампа, для другого — отклонение. Поэтому у каждой установки — её показатели против
                 общей нормы и <b>дрейф</b>: конец работы штампа против его же начала (его собственная норма; так видно
-                износ штампа). Дрейф считается, когда циклов ≥ 30.</p>
+                износ штампа). Дрейф считается, когда циклов ≥ 30.
+            </p>
             <table class="tbl small">
                 <tr>
                     <th>замена штампа</th>
@@ -195,7 +196,8 @@
                 {{range .}}<tr>
                     <td class="nowrap"><b>{{.Change}}</b></td>
                     <td class="nowrap{{if .OtherRecipe}} st-warn{{end}}">{{.Recipe}}{{if .OtherRecipe}}
-                        <b>другой</b>{{end}}</td>
+                        <b>другой</b>{{end}}
+                    </td>
                     <td class="nowrap">{{.From}} — {{.To}}</td>
                     <td>{{.Cycles}}</td>
                     <td>{{v .Strokes}}</td>

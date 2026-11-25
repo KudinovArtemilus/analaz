@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Отчёт press-go · {{.P.Label}}</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+
+<body class="report-page">
+    <header class="top no-print">
+        <span class="brand">press-go</span>
+        <nav class="nav"><a href="/">Циклы</a><a href="/analysis">Анализ</a><a href="/piece">Заготовка</a><a
+                href="/report" class="on">Отчёт</a><a href="/admin">Настройки</a></nav>
+        <span class="muted">папка данных: {{.Data}}</span>
+    </header>
+
+    <form class="report-form no-print" method="get" action="/report">
+        <label>Период
+            <select name="p" onchange="this.form.submit()">
+                <option value="shift" {{if eq .P.Kind "shift" }} selected{{end}}>смена 08:00–20:00</option>
+                <option value="day" {{if eq .P.Kind "day" }} selected{{end}}>сутки</option>
+                <option value="week" {{if eq .P.Kind "week" }} selected{{end}}>неделя (7 суток)</option>
+                <option value="month" {{if eq .P.Kind "month" }} selected{{end}}>месяц (30 суток)</option>
+                <option value="custom" {{if eq .P.Kind "custom" }} selected{{end}}>свои даты</option>
+            </select></label>
+        {{if or (eq .P.Kind "shift") (eq .P.Kind "day")}}<label>дата <input type="date" name="d"
+                value="{{.P.Day}}"></label>{{end}}
+        {{if eq .P.Kind "custom"}}<label>с <input type="date" name="from" value="{{.From}}"></label><label>по <input
+                type="date" name="to" value="{{.To}}"></label>{{end}}
+        <button type="submit">Показать</button>
+        <button type="button" onclick="window.print()"><b>Печать / PDF</b></button>
+        <span class="muted small">в окне печати выберите «Сохранить как PDF»</span>
+    </form>
+
+    <main class="report">
+        <h1>Состояние оборудования: выводы</h1>
+        <p class="report-sub">{{.P.Label}} · сформировано {{.Made}} · press-go — анализ записей регистраторов</p>
+
+        {{with .Error}}<div class="error">{{.}}</div>{{else}}
+
+        <section class="report-sec">
+            <h2>Итог</h2>
+            {{if .Attention}}
+            <p><b>Требует внимания ({{len .Attention}}):</b></p>
+            <ul>{{range .Attention}}<li>{{.}}</li>{{end}}</ul>
+            {{else}}<p>Проблем по узлам не найдено.</p>{{end}}
+            <p class="muted small">Узлов «проблема»: {{.Alarms}}, «наблюдать»: {{.Warns}}. Состояние узлов — на момент
+                отчёта, по текущему рецепту (колесу) машины, относительно её нормальной работы. Работа и простои — за
+                выбранный период.</p>
+        </section>
+
+        <section class="report-sec">
+            <h2>Светофор по машинам</h2>
+            <table class="tbl report-tbl">
+                <tr>
+                    <th>Машина</th>
+                    <th>Операция</th>
+                    <th>Состояние</th>
+                    <th>Узлы: норма / наблюдать / проблема</th>
+                    <th>Циклов за период</th>
+                    <th>Последний цикл</th>
+                </tr>
+                {{range .Machines}}<tr>
+                    <td>{{.Name}}</td>
+                    <td>{{.Op}}{{if ne .View "все циклы"}}<div class="muted small">{{.View}}</div>{{end}}</td>
+                    <td>{{if .Err}}<span class="muted">{{.Err}}</span>{{else}}<span
+                            class="st-{{.StatusClass}} pill">{{.StatusWord}}</span>{{end}}</td>
+                    <td>{{.OK}} / {{.Warn}} / {{.Alarm}}</td>
+                    <td>{{.Cycles}}{{if ne .Prod .Cycles}} <span class="muted small">(рабочих {{.Prod}})</span>{{end}}
+                    </td>
+                    <td>{{.Last}}{{with .Silent}}<div class="st-warn small">{{.}}</div>{{end}}</td>
+                </tr>{{end}}
+            </table>
+        </section>
+
+        <section class="report-sec">
+            <h2>Найденные неисправности и что сделать</h2>
+            {{$any := false}}
+            {{range .Machines}}{{if or .Units .Lost}}{{$any = true}}
+            <h3>{{.Name}} · {{.Op}}</h3>
+            {{with .Units}}<table class="tbl report-tbl">
+                <tr>
+                    <th>Узел</th>
+                    <th>Состояние</th>
+                    <th>Что видно</th>
+                    <th>Что сделать</th>
+                </tr>
+                {{range .}}<tr>
+                    <td>{{.Name}}</td>
+                    <td><span class="st-{{.Status}} pill">{{.Label}}</span></td>
+                    <td>{{.Fact}}</td>
+                    <td>{{.Check}}</td>
+                </tr>{{end}}
+            </table>{{end}}
+            {{with .Lost}}<p><b>Пропал сигнал датчика</b> (канал стал ровным нулём, а однотипные работают) — проверить
+                датчик и проводку:</p>
+            <ul>{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
+            {{end}}{{end}}
+            {{if not $any}}<p>Неисправностей не найдено.</p>{{end}}
+        </section>
+
+        <section class="report-sec">
+            <h2>Работа и простои за период</h2>
+            <table class="tbl report-tbl">
+                <tr>
+                    <th>Машина</th>
+                    <th>Операция</th>
+                    <th>В работе, ч</th>
+                    <th>Без циклов, ч</th>
+                    <th>Самые долгие паузы (дольше 30 мин)</th>
+                </tr>
+                {{range .Machines}}{{if not .Err}}<tr>
+                    <td>{{.Name}}</td>
+                    <td>{{.Op}}</td>
+                    <td>{{printf "%.1f" .WorkH}}</td>
+                    <td>{{printf "%.1f" .IdleH}}</td>
+                    <td>{{range .Pauses}}<div>{{.From}} — {{.To}} · {{.Dur}}</div>{{else}}—{{end}}</td>
+                </tr>{{end}}{{end}}
+            </table>
+            <p class="muted small">«В работе» — время, когда циклы шли с перерывами не дольше 30 минут; «без циклов» —
+                простой, наладка или регистратор не писал. Повреждённые файлы регистратора в расчёт не входят.</p>
+            {{range .Machines}}{{with .Events}}<h3>Что меняли: {{$.P.Label}}</h3>{{break}}{{end}}{{end}}
+            {{range .Machines}}{{if .Events}}<p><b>{{.Name}} · {{.Op}}</b></p>
+            <ul class="small">{{range .Events}}<li>{{.At}} — {{.KindName}}: {{.Text}}</li>{{end}}</ul>{{end}}{{end}}
+        </section>
+
+        <section class="report-sec">
+            <h2>Что делает система</h2>
+            <p>press-go — служба на компьютере АСУП: сама читает записи регистраторов машин (по одному файлу на цикл),
+                считает по каждому циклу признаки с физическим смыслом (усилие, ход, давления, работа насосов и
+                клапанов, зажим штампа…) и сравнивает их с нормальной работой этой же машины на том же рецепте (колесе).
+            </p>
+            <ul>
+                <li>Подключено машин: {{len .Profiles}}{{range .Profiles}}<div>· {{.}}</div>{{end}}</li>
+                <li>Светофор по узлам: «норма / наблюдать / проблема» с причиной и что проверить; прогноз, когда
+                    показатель дойдёт до порога.</li>
+                <li>Журнал изменений: смены рецепта и колеса, замены штампа и валков, изменения заданий, паузы — чтобы
+                    отличать поломку от перенастройки.</li>
+                <li>Аномальные циклы, медленные тренды (износ), поведение перед остановами, пропавшие и замершие
+                    датчики.</li>
+                <li>Архив важных циклов (аномалии, перед остановами, повреждённые записи) — их можно открыть и
+                    посмотреть осциллограммы.</li>
+                <li>Нагрузка на сеть машин ограничена: файлы читаются не быстрее заданной скорости, у каждой машины
+                    своя.</li>
+            </ul>
+        </section>
+        {{end}}
+    </main>
+</body>
+
+</html>

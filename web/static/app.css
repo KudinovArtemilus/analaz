@@ -952,3 +952,109 @@ h4.sub {
 .hz-hint {
     margin: 6px 0 2px;
 }
+
+/* Отчёт для руководства (report.html): на экране — как остальные страницы, на печати — A4 без меню */
+.report-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    align-items: center;
+    padding: 10px 16px;
+}
+
+.report {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 8px 16px 32px;
+}
+
+.report h1 {
+    font-size: 22px;
+    margin: 8px 0 2px;
+}
+
+.report-sub {
+    color: var(--muted);
+    margin: 0 0 12px;
+}
+
+.report-sec {
+    margin: 18px 0;
+}
+
+.report-sec h2 {
+    font-size: 17px;
+    border-bottom: 1px solid var(--grid);
+    padding-bottom: 3px;
+}
+
+.report-sec h3 {
+    font-size: 14px;
+    margin: 12px 0 4px;
+}
+
+.report-tbl td,
+.report-tbl th {
+    vertical-align: top;
+}
+
+.pill {
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+@media print {
+    @page {
+        size: A4;
+        margin: 14mm 12mm;
+    }
+
+    .no-print {
+        display: none !important;
+    }
+
+    body.report-page {
+        background: #fff;
+        color: #000;
+    }
+
+    .report {
+        max-width: none;
+        padding: 0;
+    }
+
+    .report-sec {
+        break-inside: avoid-page;
+    }
+
+    .report-tbl tr {
+        break-inside: avoid;
+    }
+
+    .st-alarm,
+    .st-warn,
+    .st-ok {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+
+.pill.st-alarm {
+    border: 0;
+    background: var(--danger);
+    color: #fff;
+}
+
+.pill.st-warn {
+    border: 0;
+    background: var(--warn);
+    color: #000;
+}
+
+.pill.st-ok {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--grid);
+}

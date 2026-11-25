@@ -147,6 +147,9 @@ func Evaluate(P *Dataset, normMed func(string) float64, sig map[string]float64, 
 				}
 			}
 			line := fmt.Sprintf("%s: сейчас %s, норма %s (%+.0f%%)", in.Label, fmtv(cur, in.Unit), fmtv(base, in.Unit), rel*100)
+			if math.Abs(base) < 1e-9 { // норма 0: процент бессмыслен (у КПС было «+500000000000%»)
+				line = fmt.Sprintf("%s: сейчас %s, в норме было 0", in.Label, fmtv(cur, in.Unit))
+			}
 			if in.Bad == "down" && finite(worst) {
 				line += ", минимум за последний период " + fmtv(worst, in.Unit)
 			}
