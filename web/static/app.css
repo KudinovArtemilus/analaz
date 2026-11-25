@@ -1005,10 +1005,63 @@ h4.sub {
     white-space: nowrap;
 }
 
+.report-head {
+    border-bottom: 2px solid var(--text);
+    padding-bottom: 8px;
+    margin-bottom: 6px;
+}
+
+.report-org {
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.report-intro td {
+    padding: 1px 12px 1px 0;
+    vertical-align: top;
+}
+
+.report-intro td:first-child {
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.report-sign {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 32px;
+    break-inside: avoid;
+}
+
+.report-line {
+    display: inline-block;
+    width: 45mm;
+    border-bottom: 1px solid currentColor;
+    height: 1.2em;
+}
+
+.report-date {
+    flex-basis: 100%;
+    margin-top: 6px;
+}
+
 @media print {
+
+    /* поля 0 — браузер не печатает колонтитулы (заголовок вкладки сверху, адрес снизу);
+     отступ от края даёт padding, clone повторяет его на каждом листе */
     @page {
         size: A4;
-        margin: 14mm 12mm;
+        margin: 0;
+    }
+
+    .report {
+        padding: 14mm 12mm !important;
+        -webkit-box-decoration-break: clone;
+        box-decoration-break: clone;
     }
 
     .no-print {
@@ -1022,7 +1075,6 @@ h4.sub {
 
     .report {
         max-width: none;
-        padding: 0;
     }
 
     .report-sec {

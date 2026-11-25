@@ -111,6 +111,10 @@
         <label>Копии кольцевого буфера, дней <input name="ring_days"
             value="{{if .C.Archive.RingDays}}{{.C.Archive.RingDays}}{{else}}2{{end}}" size="3"> <span
             class="muted small">папка данных\ring; ~2,4 ГБ в сутки у пресса 5</span></label>
+        <label>Отчёт составил (ФИО) <input name="report_by" value="{{.C.ReportBy}}" size="22"
+            placeholder="Иванов И.И."></label>
+        <label class="wide">Должность <input name="report_role" value="{{.C.ReportRole}}"
+            placeholder="инженер-электроник"> <span class="muted small">в шапке и подписи «Отчёта»</span></label>
         <div class="actions"><button type="submit">Сохранить</button></div>
       </form>
       <p class="muted small">Буфер регистратора хранит около двух недель. В архив (<b>папка

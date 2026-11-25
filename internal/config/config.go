@@ -19,11 +19,13 @@ import (
 
 // Config — весь файл настроек.
 type Config struct {
-	Listen      string    `json:"listen"`       // адрес веб-сервера: localhost:8080 или :8080 для сети
-	DataDir     string    `json:"data_dir"`     // где служба хранит архив, признаки, базу
-	NetMBps     float64   `json:"net_mbps"`     // чтение с одного сетевого сервера не быстрее, МБ/с (0 — netio.DefaultMBps)
-	FeaturesDir string    `json:"features_dir"` // таблицы признаков features*_OP1.csv.gz (пока — results у run.py)
-	NormsDir    string    `json:"norms_dir"`    // хранимые нормы norm_OP1.json; пусто — та же, что features_dir
+	Listen      string    `json:"listen"`                // адрес веб-сервера: localhost:8080 или :8080 для сети
+	DataDir     string    `json:"data_dir"`              // где служба хранит архив, признаки, базу
+	NetMBps     float64   `json:"net_mbps"`              // чтение с одного сетевого сервера не быстрее, МБ/с (0 — netio.DefaultMBps)
+	FeaturesDir string    `json:"features_dir"`          // таблицы признаков features*_OP1.csv.gz (пока — results у run.py)
+	ReportBy    string    `json:"report_by,omitempty"`   // отчёт составил: ФИО (Кудинов А.В.) — в шапку и подпись отчёта
+	ReportRole  string    `json:"report_role,omitempty"` // его должность: «инженер-электроник, разработчик ПО»
+	NormsDir    string    `json:"norms_dir"`             // хранимые нормы norm_OP1.json; пусто — та же, что features_dir
 	Archive     Archive   `json:"archive"`
 	Profiles    []Profile `json:"profiles"`
 }

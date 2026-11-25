@@ -233,6 +233,8 @@ func (s *Server) adminSaveArchive(w http.ResponseWriter, r *http.Request) {
 		}
 		c.Archive = config.Archive{KeepDays: days, KeepEvery: every, MaxGB: gb, RingDays: ringDays}
 		c.FeaturesDir = strings.TrimSpace(f.Get("features_dir"))
+		c.ReportBy = strings.TrimSpace(f.Get("report_by"))
+		c.ReportRole = strings.TrimSpace(f.Get("report_role"))
 		c.DataDir = strings.TrimSpace(f.Get("data_dir"))
 		return nil
 	})

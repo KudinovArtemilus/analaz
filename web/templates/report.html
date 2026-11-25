@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Отчёт press-go · {{.P.Label}}</title>
+    <title>Состояние оборудования {{.P.Label}}</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -36,8 +36,29 @@
     </form>
 
     <main class="report">
-        <h1>Состояние оборудования: выводы</h1>
-        <p class="report-sub">{{.P.Label}} · сформировано {{.Made}} · press-go — анализ записей регистраторов</p>
+        <div class="report-head">
+            <div class="report-org">АСУП · анализ записей регистраторов</div>
+            <h1>Отчёт о состоянии оборудования</h1>
+            <table class="report-intro">
+                <tr>
+                    <td>Период</td>
+                    <td><b>{{.P.Label}}</b></td>
+                </tr>
+                <tr>
+                    <td>Составил</td>
+                    <td>{{if .By}}<b>{{.By}}</b>{{with .Role}}, {{.}}{{end}}{{else}}<span class="muted no-print">укажите
+                            ФИО в «Настройки» → «Хранение»</span>{{end}}</td>
+                </tr>
+                <tr>
+                    <td>Дата</td>
+                    <td>{{.Made}}</td>
+                </tr>
+                <tr>
+                    <td>Источник</td>
+                    <td>записи регистраторов машин, обработка программой press-go</td>
+                </tr>
+            </table>
+        </div>
 
         {{with .Error}}<div class="error">{{.}}</div>{{else}}
 
@@ -148,6 +169,12 @@
             </ul>
         </section>
         {{end}}
+        <div class="report-sign">
+            <span>Составил{{with .Role}}: {{.}}{{end}}</span>
+            <span class="report-line"></span>
+            <span>{{if .By}}{{.By}}{{else}}&nbsp;{{end}}</span>
+            <span class="report-date">«___» ____________ 20__ г.</span>
+        </div>
     </main>
 </body>
 

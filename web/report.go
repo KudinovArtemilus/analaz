@@ -125,6 +125,10 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 	p, err := reportPeriodOf(r.URL.Query(), now)
 	data := map[string]any{"Data": s.rootsLabel(), "P": p, "Made": now.Format("02.01.2006 15:04"),
 		"From": r.URL.Query().Get("from"), "To": r.URL.Query().Get("to")}
+	if s.cfg != nil {
+		c := s.cfg.Get()
+		data["By"], data["Role"] = c.ReportBy, c.ReportRole
+	}
 	if err != nil {
 		data["Error"] = err.Error()
 		s.render(w, "report.html", data)
