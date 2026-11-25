@@ -57,7 +57,7 @@ func TestEvaluateCasedrainPeers(t *testing.T) {
 	}
 	P := testSet(everyMin(n, time.Hour), cols...)
 	B := firstRows(P, 10)
-	diag, _ := Evaluate(P, func(f string) float64 { return NanMedian(B.Col(f)) }, map[string]float64{}, float64(n-1), nil)
+	diag, _ := Evaluate(P, func(f string) float64 { return NanMedian(B.Col(f)) }, map[string]float64{}, float64(n-1), nil, nil)
 	got := map[string]Diag{}
 	for _, d := range diag {
 		got[d.Name] = d

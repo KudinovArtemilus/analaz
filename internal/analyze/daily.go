@@ -99,7 +99,7 @@ func Days(d *Dataset) []time.Time {
 // Daily повторяет one_day из daily.py: как отработал пресс за сутки по сравнению с нормой
 // (норма — вся история до этих суток, если её хотя бы 30 рабочих циклов).
 // d — все циклы одной операции по времени. stored — хранимая норма (nil — считать, как в Python).
-func Daily(d *Dataset, day time.Time, op string, gapMin, zThr float64, stored *NormSet) (*DayReport, error) {
+func Daily(d *Dataset, day time.Time, op string, gapMin, zThr float64, stored *NormSet, lim map[string]Limit) (*DayReport, error) {
 	d0 := day.Truncate(24 * time.Hour)
 	d1 := d0.Add(24 * time.Hour)
 	upto := d.Where(func(i int) bool { return d.Times[i].Before(d1) })
@@ -175,7 +175,7 @@ func Daily(d *Dataset, day time.Time, op string, gapMin, zThr float64, stored *N
 		win = T
 	}
 	sig = floorSigmaMap(sig, StepFloors(P, slices.Concat(cols.Eng, cols.Raw))) // σ не меньше шага записи
-	r.Diag, r.Notes = Evaluate(P, normMed, sig, spanH, win)
+	r.Diag, r.Notes = Evaluate(P, normMed, sig, spanH, win, lim)
 
 	// простои внутри суток, включая паузу от последнего цикла прошлых суток
 	gaps := make([]float64, 0, upto.Len())

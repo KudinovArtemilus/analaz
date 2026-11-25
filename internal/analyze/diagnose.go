@@ -47,7 +47,8 @@ var (
 // P — рабочие циклы по времени, normMed — медиана признака в норме (B[f].median() в Python
 // или из хранимой нормы), sig — робастная σ признаков, spanH — длина данных в часах,
 // T — оцениваемое окно (nil — последние 15% циклов).
-func Evaluate(P *Dataset, normMed func(string) float64, sig map[string]float64, spanH float64, T *Dataset) ([]Diag, []string) {
+// lim — паспортные пределы показателей (nil — нет): нарушение — «проблема», какой бы ни была норма.
+func Evaluate(P *Dataset, normMed func(string) float64, sig map[string]float64, spanH float64, T *Dataset, lim map[string]Limit) ([]Diag, []string) {
 	window := T != nil
 	if T == nil {
 		T = P.Rows(lastN(P.Len(), max(5, int(float64(P.Len())*0.15))))
@@ -122,6 +123,12 @@ func Evaluate(P *Dataset, normMed func(string) float64, sig map[string]float64, 
 			} else if beyond(in.AbsWarn) {
 				st = max(st, Warn)
 			}
+			passText := ""
+			if l, ok := lim[in.Feat]; ok {
+				if txt, broken := limitCheck(T.Col(in.Feat), l, in.Unit); broken {
+					st, passText = Alarm, txt
+				}
+			}
 			if badz > 8 && badrel > in.AlarmRel {
 				st = Alarm
 			} else if badz > 4 && badrel > in.WarnRel {
@@ -133,6 +140,13 @@ func Evaluate(P *Dataset, normMed func(string) float64, sig map[string]float64, 
 			rho := SpearmanXY(th, x)
 			eta := math.NaN()
 			target := in.AbsAlarm
+			if l, ok := lim[in.Feat]; ok { // прогноз — до паспортного предела, если он задан
+				if sign < 0 && !math.IsNaN(l.Min) {
+					target = l.Min
+				} else if sign > 0 && !math.IsNaN(l.Max) {
+					target = l.Max
+				}
+			}
 			if math.IsNaN(target) && sign != 0 {
 				target = base * (1 + sign*in.AlarmRel)
 			}
@@ -152,6 +166,9 @@ func Evaluate(P *Dataset, normMed func(string) float64, sig map[string]float64, 
 			}
 			if in.Bad == "down" && finite(worst) {
 				line += ", минимум за последний период " + fmtv(worst, in.Unit)
+			}
+			if passText != "" {
+				line += "; " + passText
 			}
 			if st > OK || math.Abs(badz) > 3 {
 				facts = append(facts, fact{st, line})

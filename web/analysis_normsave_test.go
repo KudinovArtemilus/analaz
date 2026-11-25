@@ -40,8 +40,9 @@ func TestNormSave(t *testing.T) {
 		return rec.Code, sq(rec.Body.String())
 	}
 	normFile := filepath.Join(dir, "norm_OP1.json")
+	save := func(f url.Values) url.Values { f.Set("step", "save"); return f }
 
-	if code, _ := post(form("2026-11-01T00:00:00", "2026-11-03T00:00:00", "x"), false); code != 403 {
+	if code, _ := post(save(form("2026-11-01T00:00:00", "2026-11-03T00:00:00", "x")), false); code != 403 {
 		t.Errorf("из сети: код %d, ждали 403", code)
 	}
 	if _, b := post(form("2026-11-01T00:00", "2026-11-01T12:00", "мало"), true); !strings.Contains(b, "нужно не меньше 30") {
@@ -54,13 +55,21 @@ func TestNormSave(t *testing.T) {
 		t.Fatal("после ошибок норма всё-таки записана")
 	}
 
+	// шаг 1 — проверка: показывает итог и кнопку сохранить, сама норма ещё не записана
 	_, b = post(form("2026-11-01T00:00:00", "2026-11-03T00:00:00", "сутки без остановов"), true)
+	if !strings.Contains(b, "Проверка периода 01.11.2026 00:00 — 03.11.2026 00:00") || !strings.Contains(b, `name="step" value="save"`) {
+		t.Fatalf("проверка периода: %.1500s", b)
+	}
+	if _, err := os.Stat(normFile); err == nil {
+		t.Fatal("после проверки норма уже записана")
+	}
+	_, b = post(save(form("2026-11-01T00:00:00", "2026-11-03T00:00:00", "сутки без остановов")), true)
 	if !strings.Contains(b, "Норма пересчитана: 01.11.2026 00:00 — 03.11.2026 00:00, 41 циклов") ||
 		!strings.Contains(b, "вручную: сутки без остановов") {
 		t.Fatalf("первое сохранение: %.800s", b)
 	}
 	time.Sleep(1100 * time.Millisecond) // имя .bak — с точностью до секунды
-	_, b = post(form("2026-11-02T00:00:00", "2026-11-04T00:00:00", "другие сутки"), true)
+	_, b = post(save(form("2026-11-02T00:00:00", "2026-11-04T00:00:00", "другие сутки")), true)
 	if !strings.Contains(b, "Прежняя сохранена как") {
 		t.Fatalf("второе сохранение: %.800s", b)
 	}

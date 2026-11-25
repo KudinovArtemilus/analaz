@@ -1,0 +1,33 @@
+<h3>Паспортные пределы · {{.P.Name}} <span class="muted small">задано: {{.Set}}</span></h3>
+<p class="muted small">Границы показателей по паспорту машины или от механиков: «давление зажима не ниже 110 бар».
+    Они не зависят от нормы. Норма — «как машина работала в выбранный период»; если тогда давление уже было
+    занижено, сравнение с нормой этого не увидит, а предел — увидит. Выход за предел у {{"5%"}} циклов и больше —
+    «проблема» в диагнозе и в отчёте; прогноз показывает, когда показатель дойдёт до предела. Пустое поле — границы
+    нет. Сохраняется сразу при выходе из поля.</p>
+<input class="search" type="search" name="q" value="{{.Q}}" placeholder="поиск: зажим, температура, MD5, Y41…"
+    hx-get="/admin/limits?id={{.P.ID}}" hx-trigger="input changed delay:300ms" hx-target="#limits">
+<table class="tbl small">
+    <tr>
+        <th>показатель</th>
+        <th>мин.</th>
+        <th>макс.</th>
+        <th>откуда цифра</th>
+        <th></th>
+    </tr>
+    {{range .Rows}}<tr>
+        <td>{{.Label}}{{with .Unit}}, {{.}}{{end}}<div class="muted">{{.Feat}}{{with .Builtin}} · {{.}}{{end}}</div>
+        </td>
+        <td colspan="3">
+            <form class="limit-row" hx-post="/admin/limit" hx-trigger="change" hx-target="next .saved"
+                hx-swap="innerHTML">
+                <input type="hidden" name="id" value="{{$.P.ID}}"><input type="hidden" name="feat" value="{{.Feat}}">
+                <input class="alias" name="min" value="{{.Min}}" size="6" inputmode="decimal">
+                <input class="alias" name="max" value="{{.Max}}" size="6" inputmode="decimal">
+                <input class="alias" name="note" value="{{.Note}}" maxlength="200" placeholder="паспорт, раздел…">
+            </form>
+        </td>
+        <td class="saved nowrap"></td>
+    </tr>{{else}}<tr>
+        <td colspan="5" class="muted">ничего не найдено</td>
+    </tr>{{end}}
+</table>

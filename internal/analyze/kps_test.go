@@ -34,7 +34,7 @@ func TestEvaluateKps(t *testing.T) {
 	for _, c := range P.Cols {
 		_, sig[c] = RobustStats(B.Col(c), P.Col(c))
 	}
-	diag, _ := Evaluate(P, func(f string) float64 { return NanMedian(B.Col(f)) }, sig, float64(n-1), nil)
+	diag, _ := Evaluate(P, func(f string) float64 { return NanMedian(B.Col(f)) }, sig, float64(n-1), nil, nil)
 	got := map[string]Diag{}
 	for _, d := range diag {
 		got[d.Name] = d
@@ -105,7 +105,7 @@ func TestPerRegimeIndicators(t *testing.T) {
 		for _, c := range P.Cols {
 			_, sig[c] = RobustStats(B.Col(c), P.Col(c))
 		}
-		diag, _ := Evaluate(P, func(f string) float64 { return NanMedian(B.Col(f)) }, sig, float64(n-1), nil)
+		diag, _ := Evaluate(P, func(f string) float64 { return NanMedian(B.Col(f)) }, sig, float64(n-1), nil, nil)
 		for _, d := range diag {
 			if d.Name == "Подача главного валка (MRF)" {
 				return d

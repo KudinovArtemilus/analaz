@@ -1131,3 +1131,29 @@ h4.sub {
 .norm-redo .actions {
     flex-basis: 100%;
 }
+
+.norm-check {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 8px 0;
+}
+
+.norm-check form {
+    margin-top: 8px;
+}
+
+.limit-row {
+    display: flex;
+    gap: 6px;
+}
+
+.limit-row .alias {
+    width: 7em;
+    flex: none;
+}
+
+.limit-row .alias[name=note] {
+    width: auto;
+    flex: 1;
+}

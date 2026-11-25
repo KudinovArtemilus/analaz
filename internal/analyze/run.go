@@ -19,7 +19,8 @@ type Options struct {
 	GapMin       float64  // пауза-останов, мин (30)
 	Source       string   // откуда таблица — пишется в сохраняемую норму
 	Note         string
-	Regime       string // режим (КПС: колесо dv860-dw895) — анализ только его циклов; "" — все вместе
+	Regime       string           // режим (КПС: колесо dv860-dw895) — анализ только его циклов; "" — все вместе
+	Limits       map[string]Limit // паспортные пределы показателей машины (из «Настроек»); nil — нет
 }
 
 // DefaultOptions — значения по умолчанию, как в analyze.py.
@@ -169,7 +170,7 @@ func Run(d *Dataset, o Options) (*Result, error) {
 
 	// ---------- диагноз по узлам ----------
 	r.SpanH = r.Prod.Times[r.Prod.Len()-1].Sub(r.Prod.Times[0]).Hours()
-	r.Diag, r.Notes = Evaluate(r.Prod, r.Norm.Median, floorSigmaMap(r.Norm.SigmaMap(), floors), r.SpanH, nil)
+	r.Diag, r.Notes = Evaluate(r.Prod, r.Norm.Median, floorSigmaMap(r.Norm.SigmaMap(), floors), r.SpanH, nil, o.Limits)
 	r.OpName = o.Op
 	if r.OpName == "" {
 		r.OpName = strings.Join(uniqueOps(d), ",")
@@ -186,7 +187,7 @@ func (r *Result) Daily(day time.Time) (*DayReport, error) {
 	if r.Stored {
 		stored = r.Norm
 	}
-	return Daily(r.All, day, r.Opts.Op, r.Opts.GapMin, r.Opts.Z, stored)
+	return Daily(r.All, day, r.Opts.Op, r.Opts.GapMin, r.Opts.Z, stored, r.Opts.Limits)
 }
 
 // uniqueOps — операции в данных по алфавиту (sorted(df["op"].unique()) в Python).

@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io/fs"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -41,7 +42,30 @@ func (s *Server) UseConfig(st *config.Store) {
 	s.an = &analysisStore{cache: map[string]*analysisEntry{}, dirs: func() (string, string) {
 		c := st.Get()
 		return c.FeaturesDir, c.NormsDir
-	}}
+	}, limits: s.limitsFor}
+}
+
+// limitsFor — паспортные пределы машины, которой принадлежит операция (nil — не заданы или нет настроек).
+func (s *Server) limitsFor(op string) map[string]analyze.Limit {
+	if s.cfg == nil {
+		return nil
+	}
+	p := s.cfg.Get().ProfileFor(op)
+	if p == nil || len(p.Limits) == 0 {
+		return nil
+	}
+	out := make(map[string]analyze.Limit, len(p.Limits))
+	for f, l := range p.Limits {
+		x := analyze.Limit{Min: math.NaN(), Max: math.NaN(), Note: l.Note}
+		if l.Min != nil {
+			x.Min = *l.Min
+		}
+		if l.Max != nil {
+			x.Max = *l.Max
+		}
+		out[f] = x
+	}
+	return out
 }
 
 // findLabel — своё название из включённых профилей по порядку ("" — нигде не задано).
@@ -129,6 +153,8 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/check", guard(s.adminCheck))
 	mux.HandleFunc("GET /admin/aliases", guard(s.adminAliases))
 	mux.HandleFunc("POST /admin/alias", guard(sameOrigin(s.adminSaveAlias)))
+	mux.HandleFunc("GET /admin/limits", guard(s.adminLimits))
+	mux.HandleFunc("POST /admin/limit", guard(sameOrigin(s.adminSaveLimit)))
 }
 
 // adminError — страница админки с ошибкой сверху; введённое не сохранено.

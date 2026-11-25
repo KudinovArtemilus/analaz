@@ -64,6 +64,33 @@ type Profile struct {
 	NetMBps float64           `json:"net_mbps,omitempty"` // своя скорость чтения с сервера(ов) профиля, МБ/с (0 — общая из «Хранение»)
 	Ring    bool              `json:"ring"`               // папки — кольцевой буфер (actual.shp, old01.shp…): циклы копируются к себе, см. internal/ring
 	Aliases map[string]string `json:"aliases"`            // своё название: исходное имя канала или признака → как показывать
+	// Limits — паспортные пределы показателей узлов (признак → границы), из документации или от механиков.
+	// Нарушение — «проблема», какой бы ни была норма: норму могли снять, когда показатель уже был занижен.
+	Limits map[string]Limit `json:"limits,omitempty"`
+}
+
+// Limit — паспортный предел показателя; nil — этой границы нет.
+type Limit struct {
+	Min  *float64 `json:"min,omitempty"`
+	Max  *float64 `json:"max,omitempty"`
+	Note string   `json:"note,omitempty"` // откуда цифра: «паспорт, раздел 5.3», «механик»
+}
+
+// SetLimit задаёт предел показателя; обе границы nil — снять.
+func (p *Profile) SetLimit(feat string, l Limit) error {
+	if l.Min != nil && l.Max != nil && *l.Min >= *l.Max {
+		return fmt.Errorf("%s: минимум %g не меньше максимума %g", feat, *l.Min, *l.Max)
+	}
+	if l.Min == nil && l.Max == nil {
+		delete(p.Limits, feat)
+		return nil
+	}
+	if p.Limits == nil {
+		p.Limits = map[string]Limit{}
+	}
+	l.Note = strings.TrimSpace(l.Note)
+	p.Limits[feat] = l
+	return nil
 }
 
 var (

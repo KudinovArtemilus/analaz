@@ -38,6 +38,9 @@ type analysisStore struct {
 	cache  map[string]*analysisEntry // по операции
 	saveMu sync.Mutex                // пересчёт нормы человеком (analysis_normsave.go)
 
+	// limits — паспортные пределы машины, которой принадлежит операция (из «Настроек»); nil — нет.
+	limits func(op string) map[string]analyze.Limit
+
 	computed atomic.Int32 // сколько раз считали — для тестов и журнала
 }
 
@@ -47,6 +50,8 @@ type analysisEntry struct {
 	path    string
 	mod     time.Time // время изменения таблицы, по которому считали
 	normMod time.Time
+	lim     map[string]analyze.Limit // паспортные пределы, с которыми считали
+	limKey  string                   // они же строкой — поменяли в «Настройках» → пересчёт
 	done    chan struct{}
 	res     *analyze.Result
 	err     error
@@ -99,6 +104,14 @@ func (a *analysisStore) normPath(op string) string {
 	return filepath.Join(norms, "norm_"+analyze.JoinOp(analyze.SplitOp(op))+".json")
 }
 
+// limitsOf — паспортные пределы операции (nil — не заданы).
+func (a *analysisStore) limitsOf(base string) map[string]analyze.Limit {
+	if a.limits == nil {
+		return nil
+	}
+	return a.limits(base)
+}
+
 // opKey — имя операции для кэша и файлов: OP3, OP3@dv860-dw895; «@all» — то же, что без колеса.
 func opKey(op string) string {
 	base, regime := analyze.SplitOp(op)
@@ -132,10 +145,13 @@ func (a *analysisStore) get(op string) (*analyze.Result, error) {
 		}
 	}
 
+	lim := a.limitsOf(base)
+	limKey := fmt.Sprint(lim) // fmt печатает карту по порядку ключей
+
 	a.mu.Lock()
 	e := a.cache[op]
-	if e == nil || e.path != path || !e.mod.Equal(st.ModTime()) || !e.normMod.Equal(normMod) {
-		e = &analysisEntry{path: path, mod: st.ModTime(), normMod: normMod, done: make(chan struct{})}
+	if e == nil || e.path != path || !e.mod.Equal(st.ModTime()) || !e.normMod.Equal(normMod) || e.limKey != limKey {
+		e = &analysisEntry{path: path, mod: st.ModTime(), normMod: normMod, lim: lim, limKey: limKey, done: make(chan struct{})}
 		a.cache[op] = e
 		go a.compute(op, e) // считает одна горутина; мьютекс на время расчёта не держим
 	}
@@ -156,6 +172,7 @@ func (a *analysisStore) compute(op string, e *analysisEntry) {
 	opts := analyze.DefaultOptions()
 	opts.Op, opts.Regime = analyze.SplitOp(op)
 	opts.Source = e.path
+	opts.Limits = e.lim
 	if !e.normMod.IsZero() {
 		ns, err := analyze.LoadNorm(a.normPath(op))
 		if err != nil {
@@ -971,7 +988,7 @@ func (s *Server) EnableAnalysis(dir, normDir string) error {
 	if err != nil || !st.IsDir() {
 		return fmt.Errorf("папка таблиц признаков недоступна: %s", dir)
 	}
-	s.an = &analysisStore{dirs: func() (string, string) { return dir, normDir }, cache: map[string]*analysisEntry{}}
+	s.an = &analysisStore{dirs: func() (string, string) { return dir, normDir }, cache: map[string]*analysisEntry{}, limits: s.limitsFor}
 	return nil
 }
 

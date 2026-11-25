@@ -47,11 +47,9 @@ func normSuggestViews(ps []analyze.NormPeriod) []normSuggestView {
 	return out
 }
 
-// saveNorm считает норму операции op (с колесом/рецептом) по циклам from…to и записывает её
-// вместо прежней; прежняя переименовывается в .bak. Возвращает новую норму и имя копии старой.
-func (a *analysisStore) saveNorm(op string, from, to time.Time, note string) (*analyze.NormSet, string, error) {
-	a.saveMu.Lock() // две формы одновременно не должны писать один файл
-	defer a.saveMu.Unlock()
+// baseRun — анализ операции op (с колесом/рецептом) с нормой по циклам from…to: из него берётся
+// новая норма и по нему проверяется период. path — куда записывать норму.
+func (a *analysisStore) baseRun(op string, from, to time.Time, note string) (*analyze.Result, string, error) {
 	op = opKey(op)
 	base, regime := analyze.SplitOp(op)
 	tabs, err := a.tables()
@@ -78,6 +76,7 @@ func (a *analysisStore) saveNorm(op string, from, to time.Time, note string) (*a
 	o.Op, o.Regime, o.Source = base, regime, src
 	o.BaseFrom, o.BaseTo = from, to
 	o.Note = "вручную: " + note
+	o.Limits = a.limitsOf(base)
 	r, err := analyze.Run(d, o)
 	if err != nil {
 		return nil, "", err
@@ -85,6 +84,34 @@ func (a *analysisStore) saveNorm(op string, from, to time.Time, note string) (*a
 	if n := r.Norm.BaseCycles; n < analyze.AutoNormCycles {
 		return nil, "", fmt.Errorf("в периоде %s — %s только %d рабочих циклов, нужно не меньше %d: расширьте период",
 			from.Format("02.01 15:04"), to.Format("02.01 15:04"), n, analyze.AutoNormCycles)
+	}
+	return r, path, nil
+}
+
+// checkNorm — проверка периода перед сохранением: что в нём хуже прежней нормы, начала данных,
+// паспортных пределов и что плывёт внутри него (analyze.CheckBase).
+func (a *analysisStore) checkNorm(op string, from, to time.Time, note string) (*analyze.Result, []analyze.NormCheck, error) {
+	r, path, err := a.baseRun(op, from, to, note)
+	if err != nil {
+		return nil, nil, err
+	}
+	var prev *analyze.NormSet
+	if _, err := os.Stat(path); err == nil {
+		if prev, err = analyze.LoadNorm(path); err != nil {
+			return nil, nil, fmt.Errorf("прежняя норма не читается: %w", err)
+		}
+	}
+	return r, r.CheckBase(prev, r.Opts.Limits), nil
+}
+
+// saveNorm считает норму по циклам from…to и записывает её вместо прежней; прежняя
+// переименовывается в .bak. Возвращает новую норму и имя копии старой.
+func (a *analysisStore) saveNorm(op string, from, to time.Time, note string) (*analyze.NormSet, string, error) {
+	a.saveMu.Lock() // две формы одновременно не должны писать один файл
+	defer a.saveMu.Unlock()
+	r, path, err := a.baseRun(op, from, to, note)
+	if err != nil {
+		return nil, "", err
 	}
 	bak := ""
 	if _, err := os.Stat(path); err == nil {
@@ -102,7 +129,21 @@ func (a *analysisStore) saveNorm(op string, from, to time.Time, note string) (*a
 	return r.Norm, bak, nil
 }
 
-// analysisNormSave — POST /analysis/norm/save (только с этого компьютера).
+// normCheckView — итог проверки периода для формы.
+type normCheckView struct {
+	From, To, Note string // что ввёл человек — для кнопки «Сохранить»
+	Label          string // 13.11 00:29 — 13.11 23:52
+	Cycles         int
+	Items          []normCheckItem
+}
+
+type normCheckItem struct{ Kind, Label, Text string }
+
+var normCheckKind = map[string]string{"passport": "за паспортным пределом", "prev": "хуже прежней нормы",
+	"start": "хуже начала данных", "trend": "плывёт внутри периода"}
+
+// analysisNormSave — POST /analysis/norm/save (только с этого компьютера). Два шага:
+// step=check (по умолчанию) — проверить период и показать находки; step=save — сохранить.
 func (s *Server) analysisNormSave(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	op := strings.ToUpper(r.PostForm.Get("op"))
@@ -111,8 +152,9 @@ func (s *Server) analysisNormSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fail := func(err error) { s.normFragment(w, r, op, "", map[string]any{"Err": err.Error()}) }
-	from, err1 := analyze.ParseWhen(strings.TrimSpace(r.PostForm.Get("from")))
-	to, err2 := analyze.ParseWhen(strings.TrimSpace(r.PostForm.Get("to")))
+	fromS, toS := strings.TrimSpace(r.PostForm.Get("from")), strings.TrimSpace(r.PostForm.Get("to"))
+	from, err1 := analyze.ParseWhen(fromS)
+	to, err2 := analyze.ParseWhen(toS)
 	if err := errors.Join(err1, err2); err != nil {
 		fail(err)
 		return
@@ -124,6 +166,20 @@ func (s *Server) analysisNormSave(w http.ResponseWriter, r *http.Request) {
 	note := strings.TrimSpace(r.PostForm.Get("note"))
 	if note == "" {
 		fail(errors.New("напишите, почему период хороший (например: «сутки без остановов, после ППР»)"))
+		return
+	}
+	if r.PostForm.Get("step") != "save" {
+		res, cs, err := s.an.checkNorm(op, from, to, note)
+		if err != nil {
+			fail(err)
+			return
+		}
+		v := normCheckView{From: fromS, To: toS, Note: note, Cycles: res.Norm.BaseCycles,
+			Label: res.Norm.BaseFrom.Format("02.01.2006 15:04") + " — " + res.Norm.BaseTo.Format("02.01.2006 15:04")}
+		for _, c := range cs {
+			v.Items = append(v.Items, normCheckItem{normCheckKind[c.Kind], c.Label, c.Text})
+		}
+		s.normFragment(w, r, op, "", map[string]any{"Check": v})
 		return
 	}
 	ns, bak, err := s.an.saveNorm(op, from, to, note)

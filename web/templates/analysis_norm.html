@@ -29,15 +29,42 @@
     </tr>{{end}}
 </table>
 {{if .Local}}
-<details class="norm-redo" {{if or .Err .Saved}} open{{end}}>
+<details class="norm-redo" {{if or .Err .Saved .Check}} open{{end}}>
     <summary><b>Пересчитать норму</b> <span class="muted small">— если она снята в неудачный период и всё после
             выглядит отклонением</span></summary>
     <p class="muted small">Норма — это «как машина работает, когда она исправна». Выберите период, когда с машиной
         точно было всё в порядке: без ремонтов, без поиска неисправности, лучше целые сутки. Нужно не меньше
         {{.MinCycles}} рабочих циклов этой операции (и колеса/рецепта, если он выбран). Прежняя норма не
         удаляется — переименовывается в <code>….json.ДАТА.bak</code>, к ней можно вернуться.</p>
-    <form hx-post="/analysis/norm/save" hx-target="#an-norm"
-        hx-confirm="Заменить норму? Прежняя сохранится как .bak, все выводы пересчитаются по новой." class="form">
+    <p class="muted small">Сначала «Проверить период»: программа сравнит его с прежней нормой, с началом данных и с
+        паспортными пределами («Настройки» → машина → «Паспортные пределы») и покажет, что в нём уже хуже или плывёт.
+        Если в «спокойные» сутки давление уже было занижено, после сохранения система примет занижение за норму.</p>
+    {{with .Check}}
+    <div class="norm-check">
+        <div><b>Проверка периода {{.Label}}</b>, {{.Cycles}} рабочих циклов</div>
+        {{if .Items}}
+        <div class="st-warn">Найдено {{len .Items}} — посмотрите, не была ли машина уже не в порядке:</div>
+        <table class="tbl small">
+            {{range .Items}}<tr>
+                <td class="nowrap">{{.Kind}}</td>
+                <td>{{.Label}}</td>
+                <td>{{.Text}}</td>
+            </tr>{{end}}
+        </table>
+        {{else}}
+        <div>Ничего не нашлось: период не хуже прежней нормы и начала данных, за паспортные пределы не выходит,
+            показатели внутри него не плывут.</div>
+        {{end}}
+        <form hx-post="/analysis/norm/save" hx-target="#an-norm"
+            hx-confirm="Заменить норму? Прежняя сохранится как .bak, все выводы пересчитаются по новой.">
+            <input type="hidden" name="op" value="{{$.Op}}"><input type="hidden" name="step" value="save">
+            <input type="hidden" name="from" value="{{.From}}"><input type="hidden" name="to" value="{{.To}}">
+            <input type="hidden" name="note" value="{{.Note}}">
+            <button type="submit">{{if .Items}}Всё равно сохранить эту норму{{else}}Сохранить эту норму{{end}}</button>
+        </form>
+    </div>
+    {{end}}
+    <form hx-post="/analysis/norm/save" hx-target="#an-norm" class="form">
         <input type="hidden" name="op" value="{{.Op}}">
         {{with .Suggest}}<div class="small norm-sug"><b>Спокойные периоды</b> <span class="muted">(меньше остановов и
                 аномалий; исправна ли была машина — решаете вы):</span>
@@ -47,11 +74,13 @@
                 аномальных {{printf "%.0f" .AnomPct}}%</div>{{end}}
         </div>{{else}}<div class="muted small norm-sug">Периода с {{.MinCycles}} рабочими циклами подряд в данных не
             нашлось.</div>{{end}}
-        <label>с <input type="datetime-local" step="1" name="from" min="{{.Min}}" max="{{.Max}}" required></label>
-        <label>по <input type="datetime-local" step="1" name="to" min="{{.Min}}" max="{{.Max}}" required></label>
-        <label class="wide">почему период хороший <input name="note" required
+        <label>с <input type="datetime-local" step="1" name="from" min="{{.Min}}" max="{{.Max}}" {{with
+                .Check}}value="{{.From}}" {{end}}required></label>
+        <label>по <input type="datetime-local" step="1" name="to" min="{{.Min}}" max="{{.Max}}" {{with
+                .Check}}value="{{.To}}" {{end}}required></label>
+        <label class="wide">почему период хороший <input name="note" {{with .Check}}value="{{.Note}}" {{end}}required
                 placeholder="сутки без остановов, после ППР, механики подтвердили"></label>
-        <div class="actions"><button type="submit">Пересчитать норму</button></div>
+        <div class="actions"><button type="submit">Проверить период</button></div>
     </form>
 </details>
 {{end}}

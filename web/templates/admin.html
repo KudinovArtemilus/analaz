@@ -68,6 +68,8 @@
           <button type="submit">Сохранить</button>
           <button type="button" hx-get="/admin/check?id={{.ID}}" hx-target="#check-{{.ID}}">Проверить папки</button>
           <a href="#aliases" hx-get="/admin/aliases?id={{.ID}}" hx-target="#aliases">Названия каналов</a>
+          <a href="#limits" hx-get="/admin/limits?id={{.ID}}" hx-target="#limits">Паспортные пределы{{with
+            .Limits}} ({{len .}}){{end}}</a>
         </div>
         <div id="check-{{.ID}}"></div>
       </form>
@@ -189,6 +191,10 @@
 
     <section class="card" id="aliases">
       <div class="muted small">Названия каналов: нажмите «Названия каналов» у профиля.</div>
+    </section>
+
+    <section class="card" id="limits">
+      <div class="muted small">Паспортные пределы показателей: нажмите «Паспортные пределы» у профиля.</div>
     </section>
     {{end}}
   </main>
