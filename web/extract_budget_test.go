@@ -11,9 +11,9 @@ import (
 	"github.com/KudinovArtemilus/press-go/internal/config"
 )
 
-// TestFeaturesBudget — проход ограничен по времени: сначала каждой машине по featFair новых
-// (медленная КПС не задерживает пресс и наоборот), потом порциями, пока не вышло время; остаток —
-// в следующем проходе, который начнётся скоро (more), а не через 5 минут.
+// TestFeaturesBudget — проход ограничен по времени: у каждой машины своя доля, featFair новых —
+// в любом случае (медленная КПС не оставляет пресс без новых и наоборот); остаток — в следующем
+// проходе, который начнётся скоро (more), а не через 5 минут.
 func TestFeaturesBudget(t *testing.T) {
 	press, kps, feat := t.TempDir(), t.TempDir(), t.TempDir()
 	for i := range 30 {
@@ -42,8 +42,9 @@ func TestFeaturesBudget(t *testing.T) {
 	}
 
 	s.feat.Run()
-	// 0–1 мин: пресс 10 новых; 1–2: КПС 10; 2–3: пресс ещё порцию 10; 3 мин — время вышло
-	if want := []string{"OP1 новые 10", "OP3 новые 10", "OP1 новые 10"}; !slices.Equal(order, want) {
+	// доля пресса — половина из 3 мин: 0–1 мин 10 новых в любом случае, 1–2 — ещё порция (1 < 1,5);
+	// доля КПС — остаток: 2–3 мин свои 10 новых в любом случае; 3 мин — время вышло
+	if want := []string{"OP1 новые 10", "OP1 новые 10", "OP3 новые 10"}; !slices.Equal(order, want) {
 		t.Fatalf("порядок: %v", order)
 	}
 	fs := s.feat.Status()
@@ -58,8 +59,8 @@ func TestFeaturesBudget(t *testing.T) {
 	}
 }
 
-// TestFeaturesTableIO — таблица операции читается и записывается раз на фазу, а не после
-// каждой порции: у пресса она — десятки МБ.
+// TestFeaturesTableIO — таблица операции читается и записывается раз за долю машины, а не
+// после каждой порции: у пресса она — десятки МБ.
 func TestFeaturesTableIO(t *testing.T) {
 	press, feat := t.TempDir(), t.TempDir()
 	for i := range 35 {
@@ -83,13 +84,13 @@ func TestFeaturesTableIO(t *testing.T) {
 			last = m
 		}
 	}
-	s.feat.Run() // 10 (фаза 0, запись) + 25 порциями по 10 (фаза 1, одна запись в конце)
+	s.feat.Run() // 10 в любом случае + 25 порциями по 10 — одна запись таблицы в конце
 	if fs := s.feat.Status(); fs.Ops[0].Added != 35 || fs.Ops[0].Rows != 35 {
 		t.Fatalf("%+v", fs.Ops[0])
 	}
-	// перед порциями фазы 1 таблица на диске менялась один раз — после фазы 0
-	if saves != 1 {
-		t.Errorf("записей таблицы между порциями: %d, ждали 1 (после фазы 0)", saves)
+	// между порциями таблица на диск не писалась
+	if saves != 0 {
+		t.Errorf("записей таблицы между порциями: %d, ждали 0", saves)
 	}
 	tb, err := batch.ReadCSVGz(target)
 	if err != nil || tb.Len() != 35 {

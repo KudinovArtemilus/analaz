@@ -64,10 +64,10 @@ const (
 
 	// Проход ограничен по времени, а не только числом файлов: с сетевой папки файлы читаются
 	// не быстрее netio (2 МБ/с), и 500 файлов КПС по 4 МБ — это 17 минут, всё это время другие
-	// машины ждали, а таблица не сохранялась. Теперь: сначала каждой машине — по featFair новых,
-	// потом новые и история порциями по featChunk (после каждой — запись таблицы), пока не
-	// вышло featBudget. Не успели — следующий проход через featBusyEvery, а не через 5 минут.
-	featBudget    = 4 * time.Minute
+	// машины ждали, а таблица не сохранялась. Теперь у каждой машины своя доля времени прохода:
+	// featFair новых в любом случае, дальше порциями по featChunk; таблица машины читается и
+	// пишется раз за долю. Не успели — следующий проход через featBusyEvery, а не через 5 минут.
+	featBudget    = 8 * time.Minute // проход длиннее — доля времени на чтение-запись таблиц меньше
 	featFair      = 10
 	featChunk     = 10
 	featBusyEvery = 30 * time.Second
@@ -233,25 +233,29 @@ func (fr *featRunner) Run() bool {
 			}
 		}
 	}
-	// --- фаза 0: каждой машине — немного новых (медленная сеть одной не задержит другие);
-	// фаза 1: остальные новые; фаза 2: история — порциями, пока не вышло время прохода ---
+	// --- круг 1: каждой машине её доля времени на новые циклы — сначала featFair в любом
+	// случае, потом порциями; таблица читается и пишется один раз за круг (у пресса это
+	// ~85 МБ и десятки секунд). Неиспользованное время переходит к следующим машинам.
+	// круг 2: остаток времени — новым, кому не хватило доли; круг 3 — истории ---
 	deadline := fr.now().Add(fr.budget)
-	for _, j := range jobs {
-		fr.apply(j, j.todo[:min(j.fresh, featFair, fr.perPass)], "новые")
-		fr.flush(j)
-	}
-	chunks := func(j *featJob, end int, phase string) {
-		for j.taken < end && j.st.Err == "" && fr.now().Before(deadline) {
+	chunks := func(j *featJob, end int, phase string, until time.Time) {
+		for j.taken < end && j.st.Err == "" && fr.now().Before(until) {
 			k := min(end, j.taken+featChunk)
 			fr.apply(j, j.todo[j.taken:k], phase)
 		}
 	}
-	for _, j := range jobs {
-		chunks(j, min(j.fresh, fr.perPass), "новые")
+	for k, j := range jobs {
+		slice := fr.now().Add(deadline.Sub(fr.now()) / time.Duration(len(jobs)-k))
+		fr.apply(j, j.todo[:min(j.fresh, featFair, fr.perPass)], "новые")
+		chunks(j, min(j.fresh, fr.perPass), "новые", slice)
 		fr.flush(j)
 	}
 	for _, j := range jobs {
-		chunks(j, min(len(j.todo), fr.perPass), "история")
+		chunks(j, min(j.fresh, fr.perPass), "новые", deadline)
+		fr.flush(j)
+	}
+	for _, j := range jobs {
+		chunks(j, min(len(j.todo), fr.perPass), "история", deadline)
 		fr.flush(j)
 	}
 	more := false
